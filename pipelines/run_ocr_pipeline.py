@@ -36,8 +36,9 @@ class OCRPipelineRunner:
         """Initializes PaddleOCR SOTA model engine with GPU support."""
         self.ocr_engine = None
         try:
+            import paddle
             from paddleocr import PaddleOCR
-            use_gpu = self.device == "cuda"
+            use_gpu = self.device == "cuda" and paddle.is_compiled_with_cuda()
             self.ocr_engine = PaddleOCR(
                 use_angle_cls=True,
                 lang="vi",
@@ -45,6 +46,8 @@ class OCRPipelineRunner:
                 show_log=False
             )
             print(f"✅ PaddleOCR engine loaded on {'GPU' if use_gpu else 'CPU'}.")
+        except ModuleNotFoundError as e:
+            print(f"⚠️ PaddleOCR loading notice: {e}. Please run 'uv pip install paddlepaddle-gpu' to enable GPU PaddleOCR.")
         except Exception as e:
             print(f"⚠️ PaddleOCR loading warning: {e}. Falling back to baseline text extractor.")
 

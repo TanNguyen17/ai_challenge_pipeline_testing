@@ -36,6 +36,8 @@ dependencies = [
     "pytest-asyncio>=0.23.0",
     # Multimodal SOTA Pipeline Dependencies
     "paddleocr>=2.7.0",
+    "paddlepaddle-gpu>=2.6.0; sys_platform == 'linux'",
+    "paddlepaddle>=2.6.0; sys_platform != 'linux'",
     "faster-whisper>=1.0.0",
     "ctranslate2>=4.0.0",
     "silero-vad>=5.0.0",
