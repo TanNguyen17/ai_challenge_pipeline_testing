@@ -1,9 +1,20 @@
 import os
 import sys
 import argparse
+import gc
+
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+def clear_vram_cache():
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     except Exception:
         pass
 
@@ -19,26 +30,32 @@ def main():
     args = parser.parse_args()
 
     print("==========================================================================")
-    print("🚀 STARTING MULTIMODAL EXTRACTION PIPELINES (OCR, ASR, OBJECT DETECTION)")
+    print("🚀 STARTING SEQUENTIAL MULTIMODAL EXTRACTION (LIGHTWEIGHT MEMORY MANAGEMENT)")
     print("==========================================================================")
 
     # 1. Run OCR Pipeline
-    print("\n--- 1/3 Running OCR Pipeline ---")
+    print("\n--- 1/3 Running OCR Pipeline (PaddleOCR) ---")
     ocr_out = os.path.join(args.output_base_dir, "ocr")
     ocr_runner = OCRPipelineRunner(args.video_dir, ocr_out)
     ocr_runner.run_benchmark(args.limit)
+    del ocr_runner
+    clear_vram_cache()
 
     # 2. Run ASR Pipeline
-    print("\n--- 2/3 Running ASR Pipeline ---")
+    print("\n--- 2/3 Running ASR Pipeline (PhoWhisper) ---")
     asr_out = os.path.join(args.output_base_dir, "asr")
     asr_runner = ASRPipelineRunner(args.video_dir, asr_out)
     asr_runner.run_benchmark(args.limit)
+    del asr_runner
+    clear_vram_cache()
 
     # 3. Run Object Detection Pipeline
-    print("\n--- 3/3 Running Object Detection Pipeline ---")
+    print("\n--- 3/3 Running Object Detection Pipeline (YOLO-World) ---")
     obj_out = os.path.join(args.output_base_dir, "objects")
     obj_runner = ObjectDetectionPipelineRunner(args.video_dir, obj_out)
     obj_runner.run_benchmark(args.limit)
+    del obj_runner
+    clear_vram_cache()
 
     print("\n==========================================================================")
     print("🎉 ALL 3 PIPELINES COMPLETED SUCCESSFULLY!")
