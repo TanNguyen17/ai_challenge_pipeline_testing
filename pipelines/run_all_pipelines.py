@@ -1,6 +1,12 @@
 import os
 import sys
 import argparse
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from run_ocr_pipeline import OCRPipelineRunner
 from run_asr_pipeline import ASRPipelineRunner
 from run_obj_detection_pipeline import ObjectDetectionPipelineRunner

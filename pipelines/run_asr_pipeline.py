@@ -1,9 +1,15 @@
 import os
+import sys
 import time
 import json
 import argparse
 import tempfile
 import subprocess
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 from typing import List, Dict, Any
 
 class ASRPipelineRunner:

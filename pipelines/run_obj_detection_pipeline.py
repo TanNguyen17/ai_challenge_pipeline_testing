@@ -1,9 +1,15 @@
 import os
+import sys
 import time
 import json
 import argparse
 import cv2
 import numpy as np
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 from typing import List, Dict, Any
 
 class ObjectDetectionPipelineRunner:

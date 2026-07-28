@@ -1,7 +1,13 @@
 import os
+import sys
 import json
 import argparse
 from typing import List, Dict, Any, Tuple
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 from rapidfuzz import fuzz
 from eval.benchmarks.recall_at_k import calculate_mean_recall_at_k
 from eval.benchmarks.mrr_calculator import calculate_mean_mrr
