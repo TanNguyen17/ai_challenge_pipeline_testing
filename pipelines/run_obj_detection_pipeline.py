@@ -97,7 +97,13 @@ class ObjectDetectionPipelineRunner:
 
     def run_benchmark(self, limit_videos: int = 50):
         print(f"\n🚀 Running Object Detection Pipeline Benchmark on up to {limit_videos} videos...")
-        video_files = [f for f in os.listdir(self.video_dir) if f.endswith(('.mp4', '.mkv', '.avi'))][:limit_videos]
+        video_files = []
+        for root, _, files in os.walk(self.video_dir):
+            for f in files:
+                if f.lower().endswith(('.mp4', '.mkv', '.avi', '.webm')):
+                    video_files.append(os.path.join(root, f))
+        video_files = video_files[:limit_videos]
+
         if not video_files:
             print("⚠️ No video files found in directory. Using sample benchmark mode...")
             video_files = [f"sample_video_{i:03d}.mp4" for i in range(min(10, limit_videos))]
@@ -107,8 +113,7 @@ class ObjectDetectionPipelineRunner:
         total_docs = 0
         total_objects = 0
 
-        for v_file in video_files:
-            v_path = os.path.join(self.video_dir, v_file)
+        for v_path in video_files:
             res = self.process_frame(v_path)
             results.append(res)
             total_time += res["elapsed_sec"]
