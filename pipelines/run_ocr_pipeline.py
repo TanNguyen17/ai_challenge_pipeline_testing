@@ -3,7 +3,7 @@ import time
 import json
 import argparse
 from typing import List, Dict, Any
-from rapidfuzz import string_metric
+from rapidfuzz import fuzz, distance
 
 class OCRPipelineRunner:
     """

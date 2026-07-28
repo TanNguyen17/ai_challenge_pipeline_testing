@@ -1,9 +1,9 @@
 import os
 import json
 import argparse
-from typing import List, Dict, Any
-from benchmarks.recall_at_k import calculate_mean_recall_at_k
-from benchmarks.mrr_calculator import calculate_mean_mrr
+from typing import List, Dict, Any, Tuple
+from eval.benchmarks.recall_at_k import calculate_mean_recall_at_k
+from eval.benchmarks.mrr_calculator import calculate_mean_mrr
 
 class BenchmarkEvaluator:
     """
