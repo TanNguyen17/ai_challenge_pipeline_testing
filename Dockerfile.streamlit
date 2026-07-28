@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+# Copy dependency configuration
+COPY pyproject.toml /app/
+
+# Install python dependencies to system python
+RUN uv pip install --system --no-cache -r pyproject.toml
+
+# Copy streamlit frontend files
+COPY gui /app/gui
+
+EXPOSE 8501
+
+CMD ["streamlit", "run", "gui/main.py", "--server.port=8501", "--server.address=0.0.0.0"]

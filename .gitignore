@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/extracted/
+data/raw/**/*.zip
+data/raw/query/
+data/raw/video*
+.idea/
+.vscode/
+*.log
+.pytest_cache/

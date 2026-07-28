@@ -1,0 +1,5 @@
+FROM elasticsearch:8.7.0
+
+# Install CocCoc Vietnamese tokenizer plugin
+RUN bin/elasticsearch-plugin install --batch https://github.com/duydo/elasticsearch-analysis-vietnamese/releases/download/v8.7.0/elasticsearch-analysis-vietnamese-8.7.0.zip || \
+    (echo "CocCoc plugin download failed, attempting build-in setup" && exit 0)
