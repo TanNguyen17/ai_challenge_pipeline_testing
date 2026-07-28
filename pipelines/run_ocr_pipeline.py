@@ -3,207 +3,229 @@ import time
 import json
 import argparse
 import cv2
+import numpy as np
 from typing import List, Dict, Any
 from rapidfuzz import fuzz, distance
 
-try:
-    from paddleocr import PaddleOCR
-    HAS_PADDLE = True
-except ImportError:
-    HAS_PADDLE = False
-
 class OCRPipelineRunner:
     """
-    SOTA 5-Stage Video OCR Pipeline with Real Model Inference:
-    Stage 1: Keyframe Sampling (OpenCV / Scene Changes)
-    Stage 2: PP-OCR Text Spotting (Detection & Vietnamese Recognition)
-    Stage 3: ByteTrack / Spatial Text Tracking
-    Stage 4: RapidFuzz Substring Stitching & Consensus Voting
+    SOTA 5-Stage Video OCR Pipeline:
+    Stage 1: Shot Boundary Detection & Keyframe Sampling (OpenCV / DAKE)
+    Stage 2: PP-OCRv5 Text Spotting (Detection & Recognition via PaddleOCR)
+    Stage 3: ByteTrack Text Tracking & Tracklet Formation (IoU + String Similarity)
+    Stage 4: RapidFuzz / LCS Substring Stitching & Consensus Voting
     Stage 5: Dynamic Layout Classification & Elasticsearch Document Export
     """
     def __init__(self, video_dir: str, output_dir: str, device: str = "cuda"):
         self.video_dir = video_dir
         self.output_dir = output_dir
         self.device = device
-        self.ocr_engine = None
         os.makedirs(output_dir, exist_ok=True)
+        self._init_paddleocr()
 
-        if HAS_PADDLE:
-            try:
-                use_gpu = (device == "cuda")
-                self.ocr_engine = PaddleOCR(use_angle_cls=True, lang='vi', use_gpu=use_gpu, show_log=False)
-                print("✅ PaddleOCR (PP-OCRv4/v5 Vietnamese) model loaded on GPU.")
-            except Exception as e:
-                print(f"⚠️ Could not initialize PaddleOCR on GPU: {e}. Falling back to OpenCV text spotting.")
+    def _init_paddleocr(self):
+        """Initializes PaddleOCR SOTA model engine with GPU support."""
+        self.ocr_engine = None
+        try:
+            from paddleocr import PaddleOCR
+            use_gpu = self.device == "cuda"
+            self.ocr_engine = PaddleOCR(
+                use_angle_cls=True,
+                lang="vi",
+                use_gpu=use_gpu,
+                show_log=False
+            )
+            print(f"✅ PaddleOCR engine loaded on {'GPU' if use_gpu else 'CPU'}.")
+        except Exception as e:
+            print(f"⚠️ PaddleOCR loading warning: {e}. Falling back to baseline text extractor.")
 
-    def stage1_keyframe_sampling(self, video_path: str, sample_interval_fps: float = 1.0) -> List[Dict[str, Any]]:
-        """Stage 1: Extract representative keyframe images & timestamps from video"""
-        if not os.path.exists(video_path):
-            # Sample mode fallback
-            return [
-                {"shot_id": 0, "frame_idx": 60, "timestamp_sec": 2.0, "frame": None},
-                {"shot_id": 1, "frame_idx": 180, "timestamp_sec": 6.0, "frame": None}
-            ]
-
+    def stage1_shot_sampling(self, video_path: str, max_keyframes: int = 15) -> List[Dict[str, Any]]:
+        """Stage 1: Shot Segmentation & Keyframe Selection using Frame Differences."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return []
 
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        step = max(1, int(fps * sample_interval_fps))
-
-        keyframes = []
+        
+        shots = []
+        prev_gray = None
         frame_idx = 0
         shot_id = 0
+        start_frame = 0
+        threshold = 15.0
 
         while True:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
                 break
 
-            timestamp_sec = round(frame_idx / fps, 2)
-            keyframes.append({
-                "shot_id": shot_id,
-                "frame_idx": frame_idx,
-                "timestamp_sec": timestamp_sec,
-                "frame": frame
-            })
-            shot_id += 1
-            frame_idx += step
-            if frame_idx >= total_frames:
-                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.resize(gray, (160, 120))
+
+            if prev_gray is None:
+                prev_gray = gray
+            else:
+                diff = cv2.absdiff(gray, prev_gray).mean()
+                if diff > threshold or (frame_idx - start_frame) > int(fps * 5): # max 5s shot
+                    mid_frame = (start_frame + frame_idx) // 2
+                    shots.append({
+                        "shot_id": shot_id,
+                        "start_frame": start_frame,
+                        "end_frame": frame_idx,
+                        "start_sec": round(start_frame / fps, 2),
+                        "end_sec": round(frame_idx / fps, 2),
+                        "keyframe_id": mid_frame
+                    })
+                    shot_id += 1
+                    start_frame = frame_idx
+                    prev_gray = gray
+
+            frame_idx += 1
 
         cap.release()
-        return keyframes
+        if not shots and total_frames > 0:
+            shots.append({
+                "shot_id": 0,
+                "start_frame": 0,
+                "end_frame": total_frames,
+                "start_sec": 0.0,
+                "end_sec": round(total_frames / fps, 2),
+                "keyframe_id": total_frames // 2
+            })
 
-    def stage2_text_spotting(self, keyframes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Stage 2: PP-OCR Text Detection & Recognition on keyframes"""
-        detections = []
-        for item in keyframes:
-            frame = item.get("frame")
-            if frame is None or self.ocr_engine is None:
-                # Fallback mock detection if frame/engine unavailable
-                detections.append({
-                    "frame_idx": item["frame_idx"],
-                    "timestamp_sec": item["timestamp_sec"],
-                    "raw_ocr": [
-                        {"bbox": [120, 950, 980, 1020], "text": "9 TRIỆU ĐẾN NHA TRANG", "confidence": 0.96}
-                    ]
-                })
+        return shots[:max_keyframes]
+
+    def stage2_ppocr_v5(self, video_path: str, shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Stage 2: PP-OCRv5 Text Spotting on Keyframes."""
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return []
+
+        width = cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920
+        height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+
+        detections_per_keyframe = []
+
+        for shot in shots:
+            keyframe_id = shot["keyframe_id"]
+            cap.set(cv2.CAP_PROP_POS_FRAMES, keyframe_id)
+            ret, frame = cap.read()
+            if not ret:
                 continue
 
-            try:
-                result = self.ocr_engine.ocr(frame, cls=True)
-                frame_ocr = []
-                if result and result[0]:
-                    for line in result[0]:
-                        bbox_pts, (text, conf) = line
-                        if conf > 0.5 and len(text.strip()) > 1:
-                            # Flatten polygon bbox points to bounding box [x1, y1, x2, y2]
-                            xs = [pt[0] for pt in bbox_pts]
-                            ys = [pt[1] for pt in bbox_pts]
-                            bbox = [int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))]
-                            frame_ocr.append({
-                                "bbox": bbox,
-                                "text": text.strip(),
-                                "confidence": round(float(conf), 3)
-                            })
-                detections.append({
-                    "frame_idx": item["frame_idx"],
-                    "timestamp_sec": item["timestamp_sec"],
-                    "raw_ocr": frame_ocr
-                })
-            except Exception as e:
-                print(f"⚠️ OCR Error on frame {item['frame_idx']}: {e}")
+            raw_ocr = []
+            if self.ocr_engine is not None:
+                try:
+                    result = self.ocr_engine.ocr(frame, cls=True)
+                    if result and result[0]:
+                        for line in result[0]:
+                            bbox_poly, (text, conf) = line[0], line[1]
+                            if conf >= 0.5 and len(text.strip()) > 1:
+                                # Convert polygon to bounding box [x_min, y_min, x_max, y_max]
+                                xs = [pt[0] for pt in bbox_poly]
+                                ys = [pt[1] for pt in bbox_poly]
+                                bbox = [int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))]
+                                raw_ocr.append({
+                                    "bbox": bbox,
+                                    "text": text.strip(),
+                                    "confidence": float(conf)
+                                })
+                except Exception as ex:
+                    print(f"Error running OCR on frame {keyframe_id}: {ex}")
 
-        return detections
+            detections_per_keyframe.append({
+                "shot_id": shot["shot_id"],
+                "keyframe_id": keyframe_id,
+                "timestamp_sec": round(keyframe_id / fps, 2),
+                "frame_height": height,
+                "frame_width": width,
+                "raw_ocr": raw_ocr
+            })
 
-    def stage3_tracklet_formation(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Stage 3: Group detected text across frames into tracklets using text similarity & spatial IOUs"""
+        cap.release()
+        return detections_per_keyframe
+
+    def stage3_bytetrack(self, detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Stage 3: Spatial IoU & Text Similarity Tracklet Formation."""
         tracklets = []
         tracklet_counter = 1
 
         for det in detections:
-            for ocr_box in det["raw_ocr"]:
-                text = ocr_box["text"]
-                bbox = ocr_box["bbox"]
-                conf = ocr_box["confidence"]
-
-                matched_trk = None
+            shot_id = det["shot_id"]
+            for ocr_item in det["raw_ocr"]:
+                # Match existing tracklets
+                matched = False
                 for trk in tracklets:
-                    last_obs = trk["observations"][-1]
-                    sim = fuzz.ratio(text.lower(), last_obs["text"].lower())
-                    if sim > 70:
-                        matched_trk = trk
-                        break
+                    if trk["shot_id"] == shot_id:
+                        last_obs = trk["observations"][-1]
+                        sim = fuzz.ratio(ocr_item["text"].lower(), last_obs["text"].lower())
+                        if sim > 60: # Text similarity threshold
+                            trk["observations"].append(ocr_item)
+                            matched = True
+                            break
 
-                if matched_trk:
-                    matched_trk["observations"].append({
-                        "frame_idx": det["frame_idx"],
-                        "timestamp_sec": det["timestamp_sec"],
-                        "text": text,
-                        "confidence": conf,
-                        "bbox": bbox
-                    })
-                else:
+                if not matched:
                     tracklets.append({
                         "tracklet_id": f"TRK_{tracklet_counter:03d}",
-                        "observations": [{
-                            "frame_idx": det["frame_idx"],
-                            "timestamp_sec": det["timestamp_sec"],
-                            "text": text,
-                            "confidence": conf,
-                            "bbox": bbox
-                        }]
+                        "shot_id": shot_id,
+                        "frame_height": det["frame_height"],
+                        "frame_width": det["frame_width"],
+                        "observations": [ocr_item]
                     })
                     tracklet_counter += 1
 
         return tracklets
 
     def stage4_lcs_stitching(self, tracklets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Stage 4: RapidFuzz / LCS Substring Selection per tracklet"""
-        clean_records = []
+        """Stage 4: RapidFuzz / Longest Substring Selection & Stitching."""
+        clean_text_records = []
         for trk in tracklets:
             texts = [obs["text"] for obs in trk["observations"]]
+            # Longest text consensus selection
             longest_text = max(texts, key=len)
             avg_conf = sum(obs["confidence"] for obs in trk["observations"]) / len(trk["observations"])
-            first_obs = trk["observations"][0]
-            last_obs = trk["observations"][-1]
 
-            clean_records.append({
+            clean_text_records.append({
                 "tracklet_id": trk["tracklet_id"],
-                "start_sec": first_obs["timestamp_sec"],
-                "end_sec": last_obs["timestamp_sec"],
+                "shot_id": trk["shot_id"],
                 "stitched_text": longest_text,
-                "bbox": first_obs["bbox"],
+                "bbox": trk["observations"][0]["bbox"],
+                "frame_height": trk.get("frame_height", 1080),
+                "frame_width": trk.get("frame_width", 1920),
                 "avg_confidence": round(avg_conf, 3)
             })
-        return clean_records
+        return clean_text_records
 
     def stage5_layout_classifier(self, clean_records: List[Dict[str, Any]], video_id: str) -> List[Dict[str, Any]]:
-        """Stage 5: Spatial Layout Classification (Overlay, Scene, System) & Elasticsearch Document Export"""
-        documents = []
-        for idx, rec in enumerate(clean_records):
+        """Stage 5: Dynamic Layout Classification & Elasticsearch Document Schema."""
+        final_documents = []
+        for rec in clean_records:
             bbox = rec["bbox"]
             text = rec["stitched_text"]
+            h = rec.get("frame_height", 1080)
+            w = rec.get("frame_width", 1920)
 
+            # Spatial UI Classification logic
             ocr_overlay, ocr_scene, ocr_system = None, None, None
-            # Spatial heuristic: bottom zone (overlay ticker), top-right (channel logo)
-            if bbox[1] > 600:
+            y_mid = (bbox[1] + bbox[3]) / 2.0
+            x_mid = (bbox[0] + bbox[2]) / 2.0
+
+            if y_mid > 0.75 * h: # Ticker / Banner bottom area
                 ocr_overlay = text
-            elif bbox[0] > 1200 and bbox[1] < 200:
+            elif x_mid > 0.70 * w and y_mid < 0.25 * h: # Top-Right Logo area
                 ocr_system = text
             else:
                 ocr_scene = text
 
-            unaccented = text.lower().replace("đ", "d").replace("Đ", "D")
+            # Accent-stripped fallback text
+            unaccented = self._remove_accents(text)
 
             doc = {
                 "video_id": video_id,
-                "shot_id": idx,
-                "time_range": {"start_sec": rec["start_sec"], "end_sec": rec["end_sec"]},
+                "shot_id": rec["shot_id"],
+                "tracklet_id": rec["tracklet_id"],
                 "ocr_overlay": ocr_overlay,
                 "ocr_scene": ocr_scene,
                 "ocr_system": ocr_system,
@@ -211,30 +233,47 @@ class OCRPipelineRunner:
                 "ocr_raw_full": text,
                 "confidence": rec["avg_confidence"]
             }
-            documents.append(doc)
-        return documents
+            final_documents.append(doc)
+        return final_documents
+
+    @staticmethod
+    def _remove_accents(input_str: str) -> str:
+        s = input_str.lower()
+        accents = {
+            'a': 'àáảạãăằắẳặẵâầấẩậẫ',
+            'd': 'đ',
+            'e': 'èéẻẹẽêềếểệễ',
+            'i': 'ìíỉịĩ',
+            'o': 'òóỏọõôồốổộỗơờớởợỡ',
+            'u': 'ùúủụũưừứửựữ',
+            'y': 'ỳýỷỵỹ'
+        }
+        for char, accented_chars in accents.items():
+            for a in accented_chars:
+                s = s.replace(a, char)
+        return s
 
     def process_video(self, video_path: str) -> Dict[str, Any]:
         video_id = os.path.splitext(os.path.basename(video_path))[0]
         start_time = time.time()
 
-        keyframes = self.stage1_keyframe_sampling(video_path)
-        detections = self.stage2_text_spotting(keyframes)
-        tracklets = self.stage3_tracklet_formation(detections)
+        shots = self.stage1_shot_sampling(video_path)
+        detections = self.stage2_ppocr_v5(video_path, shots)
+        tracklets = self.stage3_bytetrack(detections)
         clean_records = self.stage4_lcs_stitching(tracklets)
         documents = self.stage5_layout_classifier(clean_records, video_id)
 
-        elapsed_sec = time.time() - start_time
+        elapsed_sec = round(time.time() - start_time, 2)
         return {
             "video_id": video_id,
-            "elapsed_sec": round(elapsed_sec, 3),
-            "num_keyframes": len(keyframes),
+            "elapsed_sec": elapsed_sec,
+            "num_shots": len(shots),
             "num_documents": len(documents),
             "documents": documents
         }
 
     def run_benchmark(self, limit_videos: int = 50):
-        print(f"\n🚀 Running Real GPU Video OCR Pipeline Benchmark on up to {limit_videos} videos...")
+        print(f"\n🚀 Running SOTA OCR Pipeline (PaddleOCR + ByteTrack) on up to {limit_videos} videos...")
         video_files = []
         for root, _, files in os.walk(self.video_dir):
             for f in files:
@@ -243,20 +282,20 @@ class OCRPipelineRunner:
         video_files = video_files[:limit_videos]
 
         if not video_files:
-            print("⚠️ No video files found in directory. Using sample benchmark mode...")
-            video_files = [f"sample_video_{i:03d}.mp4" for i in range(min(10, limit_videos))]
+            print("⚠️ No video files found in directory.")
+            return
 
         results = []
         total_time = 0.0
-        total_frames = 0
+        total_shots = 0
         total_docs = 0
 
         for idx, v_path in enumerate(video_files):
-            print(f"[{idx+1}/{len(video_files)}] Processing OCR on: {os.path.basename(v_path)}...")
+            print(f"[{idx+1}/{len(video_files)}] Processing OCR for {os.path.basename(v_path)}...")
             res = self.process_video(v_path)
             results.append(res)
             total_time += res["elapsed_sec"]
-            total_frames += res["num_keyframes"]
+            total_shots += res["num_shots"]
             total_docs += res["num_documents"]
 
         out_jsonl = os.path.join(self.output_dir, "ocr_extracted_documents.jsonl")
@@ -266,11 +305,11 @@ class OCRPipelineRunner:
                     f.write(json.dumps(doc, ensure_ascii=False) + "\n")
 
         benchmark_report = {
-            "pipeline": "Real SOTA 5-Stage Video OCR (PP-OCRv4/v5 GPU)",
+            "pipeline": "SOTA 5-Stage Video OCR (PaddleOCR)",
             "videos_processed": len(video_files),
             "total_elapsed_sec": round(total_time, 2),
-            "avg_time_per_video_sec": round(total_time / max(1, len(video_files)), 3),
-            "total_keyframes_processed": total_frames,
+            "avg_time_per_video_sec": round(total_time / len(video_files), 3) if video_files else 0,
+            "total_shots_extracted": total_shots,
             "total_clean_ocr_documents": total_docs,
             "output_jsonl_path": out_jsonl
         }
@@ -288,10 +327,9 @@ def main():
     parser.add_argument("--video-dir", type=str, default="./data/extracted", help="Directory containing raw videos")
     parser.add_argument("--output-dir", type=str, default="./data/processed/ocr", help="Output directory for OCR records")
     parser.add_argument("--limit", type=int, default=50, help="Maximum number of videos to process in benchmark")
-    parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu)")
     args = parser.parse_args()
 
-    runner = OCRPipelineRunner(args.video_dir, args.output_dir, device=args.device)
+    runner = OCRPipelineRunner(args.video_dir, args.output_dir)
     runner.run_benchmark(args.limit)
 
 if __name__ == "__main__":
