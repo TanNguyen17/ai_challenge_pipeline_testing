@@ -56,7 +56,11 @@ class TransNetV2Detector:
         start_frame = 0
         threshold = 14.0
 
+        frame_stride = 5
         while True:
+            for _ in range(frame_stride - 1):
+                if not cap.grab():
+                    break
             ret, frame = cap.read()
             if not ret:
                 break
@@ -82,7 +86,7 @@ class TransNetV2Detector:
                     start_frame = frame_idx
                     prev_gray = gray
 
-            frame_idx += 1
+            frame_idx += frame_stride
 
         cap.release()
         if not shots and total_frames > 0:
