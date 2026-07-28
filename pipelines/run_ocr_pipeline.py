@@ -7,10 +7,12 @@ import numpy as np
 from typing import List, Dict, Any
 from rapidfuzz import fuzz, distance
 
+from extract.workers.transnet import TransNetV2Detector
+
 class OCRPipelineRunner:
     """
     SOTA 5-Stage Video OCR Pipeline:
-    Stage 1: Shot Boundary Detection & Keyframe Sampling (OpenCV / DAKE)
+    Stage 1: TransNetV2 Shot Boundary Detection & Keyframe Sampling
     Stage 2: PP-OCRv5 Text Spotting (Detection & Recognition via PaddleOCR)
     Stage 3: ByteTrack Text Tracking & Tracklet Formation (IoU + String Similarity)
     Stage 4: RapidFuzz / LCS Substring Stitching & Consensus Voting
@@ -21,6 +23,7 @@ class OCRPipelineRunner:
         self.output_dir = output_dir
         self.device = device
         os.makedirs(output_dir, exist_ok=True)
+        self.transnet_detector = TransNetV2Detector(device=device)
         self._init_paddleocr()
 
     def _init_paddleocr(self):
@@ -39,62 +42,9 @@ class OCRPipelineRunner:
         except Exception as e:
             print(f"⚠️ PaddleOCR loading warning: {e}. Falling back to baseline text extractor.")
 
-    def stage1_shot_sampling(self, video_path: str, max_keyframes: int = 15) -> List[Dict[str, Any]]:
-        """Stage 1: Shot Segmentation & Keyframe Selection using Frame Differences."""
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return []
-
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        shots = []
-        prev_gray = None
-        frame_idx = 0
-        shot_id = 0
-        start_frame = 0
-        threshold = 15.0
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.resize(gray, (160, 120))
-
-            if prev_gray is None:
-                prev_gray = gray
-            else:
-                diff = cv2.absdiff(gray, prev_gray).mean()
-                if diff > threshold or (frame_idx - start_frame) > int(fps * 5): # max 5s shot
-                    mid_frame = (start_frame + frame_idx) // 2
-                    shots.append({
-                        "shot_id": shot_id,
-                        "start_frame": start_frame,
-                        "end_frame": frame_idx,
-                        "start_sec": round(start_frame / fps, 2),
-                        "end_sec": round(frame_idx / fps, 2),
-                        "keyframe_id": mid_frame
-                    })
-                    shot_id += 1
-                    start_frame = frame_idx
-                    prev_gray = gray
-
-            frame_idx += 1
-
-        cap.release()
-        if not shots and total_frames > 0:
-            shots.append({
-                "shot_id": 0,
-                "start_frame": 0,
-                "end_frame": total_frames,
-                "start_sec": 0.0,
-                "end_sec": round(total_frames / fps, 2),
-                "keyframe_id": total_frames // 2
-            })
-
-        return shots[:max_keyframes]
+    def stage1_transnet_sampling(self, video_path: str, max_keyframes: int = 15) -> List[Dict[str, Any]]:
+        """Stage 1: TransNetV2 Shot Boundary Segmentation & Keyframe Selection."""
+        return self.transnet_detector.detect_shots(video_path, max_keyframes=max_keyframes)
 
     def stage2_ppocr_v5(self, video_path: str, shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Stage 2: PP-OCRv5 Text Spotting on Keyframes."""
@@ -257,7 +207,7 @@ class OCRPipelineRunner:
         video_id = os.path.splitext(os.path.basename(video_path))[0]
         start_time = time.time()
 
-        shots = self.stage1_shot_sampling(video_path)
+        shots = self.stage1_transnet_sampling(video_path)
         detections = self.stage2_ppocr_v5(video_path, shots)
         tracklets = self.stage3_bytetrack(detections)
         clean_records = self.stage4_lcs_stitching(tracklets)
