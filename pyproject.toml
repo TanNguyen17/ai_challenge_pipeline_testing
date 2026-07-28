@@ -37,7 +37,7 @@ dependencies = [
     # Multimodal SOTA Pipeline Dependencies
     "paddleocr>=2.7.0",
     "paddlepaddle-gpu>=2.6.0; sys_platform == 'linux'",
-    "paddlepaddle>=2.6.0; sys_platform != 'linux'",
+    "paddlepaddle>=2.6.0; sys_platform != 'linux' and python_version < '3.14'",
     "faster-whisper>=1.0.0",
     "ctranslate2>=4.0.0",
     "silero-vad>=5.0.0",
@@ -48,7 +48,7 @@ dependencies = [
     "transformers>=4.40.0",
     "accelerate>=0.29.0",
     "scikit-image>=0.21.0",
-    "scenedetect[opencv]>=0.6.2",
+    "scenedetect>=0.6.2",
     "tqdm>=4.66.0"
 ]
 
