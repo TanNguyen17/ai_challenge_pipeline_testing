@@ -49,8 +49,11 @@ d:\AI-HCMC\
 # 1. Cài đặt uv (nếu server chưa có)
 pip install uv
 
-# 2. Tạo virtualenv và cài tự động 100% dependencies bằng uv sync
+# 2. Tạo virtualenv và cài tự động 100% dependencies (bao gồm GPU PyTorch, PaddlePaddle-GPU, Whisper, YOLO)
 uv sync
+
+# 3. Tự động tải trước (preload) toàn bộ trọng số mô hình SOTA (PaddleOCR, PhoWhisper, YOLO-World, CLIP)
+uv run python preload_models.py
 ```
 
 ### 3.2 Tải & Giải nén Dữ liệu Benchmark (~650 Videos, ~7.4 GB) bằng `uv run`
