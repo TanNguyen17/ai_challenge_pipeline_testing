@@ -22,16 +22,25 @@ def preload_all_models():
     print("🚀 PRE-DOWNLOADING MODEL WEIGHTS TO DISK (LIGHTWEIGHT CACHING)")
     print("==========================================================================")
 
-    # 1. Preload PaddleOCR (PP-OCRv5 Vietnamese)
-    print("\n--- 1/4 Pre-downloading PaddleOCR Weights ---")
+    # 1. Preload Qwen2-VL (OCR)
+    print("\n--- 1/4 Pre-downloading Qwen2-VL-2B-Instruct Weights (OCR) ---")
     try:
-        from paddleocr import PaddleOCR
-        ocr = PaddleOCR(use_angle_cls=True, lang="vi", ocr_version="PP-OCRv4", show_log=False)
-        del ocr
+        from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+        import torch
+        qwen_id = "Qwen/Qwen2-VL-2B-Instruct"
+        print(f"Loading {qwen_id}...")
+        processor = AutoProcessor.from_pretrained(qwen_id)
+        model = Qwen2VLForConditionalGeneration.from_pretrained(
+            qwen_id, 
+            torch_dtype=torch.float16, 
+            device_map="auto"
+        )
+        del model
+        del processor
         clear_memory()
-        print("✅ PaddleOCR weights cached to disk.")
+        print("✅ Qwen2-VL-2B-Instruct cached to disk.")
     except Exception as e:
-        print(f"⚠️ PaddleOCR pre-download notice: {e}")
+        print(f"❌ Failed caching Qwen2-VL: {e}")
 
     # 2. Preload Faster-Whisper / PhoWhisper ASR
     print("\n--- 2/4 Pre-downloading Faster-Whisper ASR Weights ---")

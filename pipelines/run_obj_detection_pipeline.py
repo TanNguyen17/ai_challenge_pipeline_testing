@@ -106,8 +106,59 @@ class ObjectDetectionPipelineRunner:
 
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
+        
+    def _process_yolo_batch(self, frame_batch, shot_batch, video_id, frame_width, frame_height, per_frame_documents):
+        if self.yolo_model is None:
+            return
+            
+        try:
+            # Batch inference maximizes GPU utilization
+            results = self.yolo_model(frame_batch, verbose=False, device="cuda" if self.device == "cuda" else "cpu")
+            for i, res in enumerate(results):
+                f_idx, shot = shot_batch[i]
+                frame_detections = []
+                
+                boxes = res.boxes
+                for box in boxes:
+                    conf = float(box.conf[0])
+                    if conf >= 0.35:
+                        cls_id = int(box.cls[0])
+                        class_name = self.yolo_model.names[cls_id]
+                        xyxy = box.xyxy[0].tolist()
+                        bbox_norm = [
+                            round(xyxy[0] / frame_width, 3),
+                            round(xyxy[1] / frame_height, 3),
+                            round(xyxy[2] / frame_width, 3),
+                            round(xyxy[3] / frame_height, 3)
+                        ]
+                        spatial_pos = self._determine_spatial_position(xyxy, frame_width, frame_height)
+
+                        frame_detections.append({
+                            "label": class_name,
+                            "confidence": round(conf, 3),
+                            "bbox": bbox_norm,
+                            "spatial_position": spatial_pos
+                        })
+                
+                # Emit per-frame document
+                doc = {
+                    "video_id": video_id,
+                    "frame_idx": f_idx,
+                    "keyframe_n": shot.get("keyframe_n", 0),
+                    "time_range": {"start_sec": shot.get("start_sec", 0.0), "end_sec": shot.get("end_sec", 0.0)},
+                    "detections": frame_detections
+                }
+                per_frame_documents.append(doc)
+        except Exception as ex:
+            print(f"Error running YOLO batch for {video_id}: {ex}")
+
+    def process_video_objects(self, video_path: str) -> Dict[str, Any]:
 
         per_frame_documents = []
+        
+        BATCH_SIZE = 16
+        frame_batch = []
+        shot_batch = []
 
         for shot in tqdm(shots, desc=f"ObjDet {video_id}", leave=False):
             f_idx = shot["keyframe_id"]
@@ -117,45 +168,17 @@ class ObjectDetectionPipelineRunner:
                 continue
 
             masked_frame = self.stage1_spatial_ui_masking(raw_frame)
-            frame_detections = []
+            frame_batch.append(masked_frame)
+            shot_batch.append((f_idx, shot))
 
-            if self.yolo_model is not None:
-                try:
-                    results = self.yolo_model(masked_frame, verbose=False, device="cuda" if self.device == "cuda" else "cpu")
-                    if results and len(results) > 0:
-                        boxes = results[0].boxes
-                        for box in boxes:
-                            conf = float(box.conf[0])
-                            if conf >= 0.35:
-                                cls_id = int(box.cls[0])
-                                class_name = self.yolo_model.names[cls_id]
-                                xyxy = box.xyxy[0].tolist()
-                                bbox_norm = [
-                                    round(xyxy[0] / frame_width, 3),
-                                    round(xyxy[1] / frame_height, 3),
-                                    round(xyxy[2] / frame_width, 3),
-                                    round(xyxy[3] / frame_height, 3)
-                                ]
-                                spatial_pos = self._determine_spatial_position(xyxy, frame_width, frame_height)
-
-                                frame_detections.append({
-                                    "label": class_name,
-                                    "confidence": round(conf, 3),
-                                    "bbox": bbox_norm,
-                                    "spatial_position": spatial_pos
-                                })
-                except Exception as ex:
-                    print(f"Error running YOLO on frame {f_idx} for {video_id}: {ex}")
-
-            # Emit per-frame document
-            doc = {
-                "video_id": video_id,
-                "frame_idx": f_idx,
-                "keyframe_n": shot.get("keyframe_n", 0),
-                "time_range": {"start_sec": shot.get("start_sec", 0.0), "end_sec": shot.get("end_sec", 0.0)},
-                "detections": frame_detections
-            }
-            per_frame_documents.append(doc)
+            if len(frame_batch) >= BATCH_SIZE:
+                self._process_yolo_batch(frame_batch, shot_batch, video_id, frame_width, frame_height, per_frame_documents)
+                frame_batch = []
+                shot_batch = []
+                
+        # Process remaining frames
+        if len(frame_batch) > 0:
+            self._process_yolo_batch(frame_batch, shot_batch, video_id, frame_width, frame_height, per_frame_documents)
 
         cap.release()
         
