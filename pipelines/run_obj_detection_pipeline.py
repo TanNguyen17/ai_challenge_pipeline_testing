@@ -1,9 +1,13 @@
 import os
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["OPENCV_FFMPEG_DEBUG"] = "0"
 import sys
 import time
 import json
 import argparse
 import cv2
+import numpy as np
+from tqdm import tqdm
 import numpy as np
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -105,7 +109,7 @@ class ObjectDetectionPipelineRunner:
 
         per_frame_documents = []
 
-        for shot in shots:
+        for shot in tqdm(shots, desc=f"ObjDet {video_id}", leave=False):
             f_idx = shot["keyframe_id"]
             cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
             ret, raw_frame = cap.read()

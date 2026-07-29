@@ -1,9 +1,13 @@
 import os
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["OPENCV_FFMPEG_DEBUG"] = "0"
 import sys
 import time
 import json
 import argparse
 import cv2
+import numpy as np
+from tqdm import tqdm
 import numpy as np
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -70,7 +74,7 @@ class OCRPipelineRunner:
 
         detections_per_keyframe = []
 
-        for shot in shots:
+        for shot in tqdm(shots, desc=f"OCR {os.path.basename(video_path)}", leave=False):
             keyframe_id = shot["keyframe_id"]
             cap.set(cv2.CAP_PROP_POS_FRAMES, keyframe_id)
             ret, frame = cap.read()
