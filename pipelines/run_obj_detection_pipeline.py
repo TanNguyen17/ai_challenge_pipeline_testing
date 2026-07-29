@@ -37,10 +37,10 @@ class ObjectDetectionPipelineRunner:
         try:
             from ultralytics import YOLOE
             # We use YOLOE (You Only Look Once for Everything) and MUST set open-vocab classes
-            model_weights = "jameslahm/yoloe-v8l"
+            model_weights = "yoloe-m.pt"
             try:
                 print(f"Loading YOLOE Object Detection model '{model_weights}'...")
-                self.yolo_model = YOLOE.from_pretrained(model_weights)
+                self.yolo_model = YOLOE(model_weights)
                 if self.device == "cuda":
                     self.yolo_model.to("cuda")
                 
