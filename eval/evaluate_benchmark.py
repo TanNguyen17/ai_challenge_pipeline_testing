@@ -21,9 +21,10 @@ class BenchmarkEvaluator:
     Evaluates real extracted OCR, ASR, and Object Detection database records.
     Calculates Recall@1, Recall@5, Recall@10, Recall@100, MRR, and A/B Test improvements.
     """
-    def __init__(self, processed_data_dir: str, query_dir: str):
+    def __init__(self, processed_data_dir: str, query_dir: str, gt_path: str = None):
         self.processed_data_dir = processed_data_dir
         self.query_dir = query_dir
+        self.gt_path = gt_path
 
     def load_processed_records(self) -> Dict[str, List[Dict[str, Any]]]:
         """Loads extracted JSONL documents across OCR, ASR, and Object Detection."""
@@ -77,33 +78,23 @@ class BenchmarkEvaluator:
                 except Exception as e:
                     print(f"⚠️ Error reading {z_path}: {e}")
 
-        # 3. If real queries found, build matching GT list or fallback
-        if queries:
+        # 4. Load Real Ground Truth if provided
+        if self.gt_path and os.path.exists(self.gt_path):
+            try:
+                import pandas as pd
+                df_gt = pd.read_csv(self.gt_path)
+                # Expected format: query, video_id, start_frame, end_frame
+                real_gt_list = []
+                for _, row in df_gt.iterrows():
+                    real_gt_list.append((row['video_id'], int(row['start_frame']), int(row['end_frame'])))
+                return queries, real_gt_list
+            except Exception as e:
+                print(f"⚠️ Could not load Ground Truth from {self.gt_path}: {e}")
 
-            sample_gt_pool = [
-                ("L21_V001", 30, 300),
-                ("L21_V002", 100, 450),
-                ("L22_V001", 50, 250),
-                ("L22_V005", 150, 400)
-            ]
-            for i in range(len(queries)):
-                gt_list.append(sample_gt_pool[i % len(sample_gt_pool)])
-            return queries, gt_list
-
-        # Fallback to default sample queries
-        sample_queries = [
-            "Tìm cảnh hiển thị dòng chữ 9 TRIỆU ĐẾN NHA TRANG",
-            "Tìm đoạn MC nói tổ chức lễ đón vị khách du lịch thứ 19 triệu",
-            "Tìm người phụ nữ áo dài đỏ chơi đàn bầu trên sân khấu",
-            "Tìm xe cứu thương di chuyển bên cạnh xe cảnh sát"
-        ]
-        sample_gt = [
-            ("L21_V001", 30, 90),
-            ("L21_V001", 120, 300),
-            ("L21_V001", 400, 450),
-            ("L22_V005", 150, 220)
-        ]
-        return sample_queries, sample_gt
+        # Fallback to dummy data for local dev
+        print("⚠️ Warning: No Ground Truth provided. Using placeholder GT for evaluation.")
+        sample_gt = [("L21_V001", 30, 90)] * len(queries)
+        return queries, sample_gt
 
     def search_extracted_records(self, query: str, records: Dict[str, List[Dict[str, Any]]]) -> List[Tuple[str, int]]:
         """Performs enhanced token + fuzzy text search across extracted database records."""
@@ -160,23 +151,8 @@ class BenchmarkEvaluator:
 
         total_extracted = len(records["ocr"]) + len(records["asr"]) + len(records["objects"])
 
-        # If GT records exist in extracted dataset, dynamically find real GT targets for evaluation
-        real_gt_list = []
-        for i, q in enumerate(queries):
-            matched_target = None
-            q_lower = q.lower()
-            # Try to match query keywords to extracted documents to establish true targets
-            for category in ["ocr", "asr"]:
-                for doc in records.get(category, []):
-                    text = doc.get("ocr_raw_full") if category == "ocr" else doc.get("asr_data", {}).get("transcript_normalized", "")
-                    if text and fuzz.partial_ratio(q_lower, str(text).lower()) > 60:
-                        v_id = doc.get("video_id", "")
-                        f_idx = (doc.get("shot_id", 0) + 1) * 30 if category == "ocr" else int(doc.get("time_range", {}).get("start_sec", 0.0) * 25.0)
-                        matched_target = (v_id, max(0, f_idx - 150), f_idx + 150)
-                        break
-                if matched_target:
-                    break
-            real_gt_list.append(matched_target if matched_target else gt_list[i % len(gt_list)])
+        # No more circular matching. We strictly use the provided gt_list.
+        real_gt_list = gt_list
 
         # 1. Baseline Evaluation (Naive / Random / Static Baseline)
         retrieved_base = [[("L22_V010", 60), ("L21_V002", 100)] for _ in queries]
@@ -222,9 +198,10 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate Multimodal Retrieval Engine against Ground Truth Benchmarks")
     parser.add_argument("--processed-dir", type=str, default="./data/processed", help="Path to processed JSONL records")
     parser.add_argument("--query-dir", type=str, default="./data/raw/query", help="Path to GT queries")
+    parser.add_argument("--gt-path", type=str, default=None, help="Path to Ground Truth CSV for testing")
     args = parser.parse_args()
 
-    evaluator = BenchmarkEvaluator(args.processed_dir, args.query_dir)
+    evaluator = BenchmarkEvaluator(args.processed_dir, args.query_dir, args.gt_path)
     report = evaluator.run_evaluation()
 
     out_file = os.path.join(args.processed_dir, "benchmark_evaluation_summary.json")
