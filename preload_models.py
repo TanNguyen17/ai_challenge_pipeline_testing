@@ -69,10 +69,10 @@ def preload_all_models():
     # 3. Preload Ultralytics YOLOE
     print("\n--- 3/4 Pre-downloading YOLOE Object Detection Weights ---")
     try:
-        from ultralytics import YOLOE
-        w_name = "yoloe-m.pt"
+        from ultralytics import YOLO
+        w_name = "yolov8x-worldv2.pt"
         try:
-            yolo = YOLOE(w_name)
+            yolo = YOLO(w_name)
             del yolo
             clear_memory()
             print(f"✅ YOLOE weights '{w_name}' cached to disk.")
