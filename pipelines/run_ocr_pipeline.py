@@ -44,6 +44,7 @@ class OCRPipelineRunner:
             self.ocr_engine = PaddleOCR(
                 use_angle_cls=True,
                 lang="vi",
+                ocr_version="PP-OCRv4",
                 use_gpu=use_gpu,
                 show_log=False
             )

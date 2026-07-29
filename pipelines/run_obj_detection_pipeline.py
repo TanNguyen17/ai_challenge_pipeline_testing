@@ -35,12 +35,12 @@ class ObjectDetectionPipelineRunner:
         """Initializes Ultralytics YOLO-World v2 / YOLOv8 SOTA Model."""
         self.yolo_model = None
         try:
-            from ultralytics import YOLO
-            # We use yolov8x-worldv2.pt as the YOLOE base and MUST set open-vocab classes
-            model_weights = "yolov8x-worldv2.pt"
+            from ultralytics import YOLOE
+            # We use YOLOE (You Only Look Once for Everything) and MUST set open-vocab classes
+            model_weights = "jameslahm/yoloe-v8l"
             try:
                 print(f"Loading YOLOE Object Detection model '{model_weights}'...")
-                self.yolo_model = YOLO(model_weights)
+                self.yolo_model = YOLOE.from_pretrained(model_weights)
                 if self.device == "cuda":
                     self.yolo_model.to("cuda")
                 

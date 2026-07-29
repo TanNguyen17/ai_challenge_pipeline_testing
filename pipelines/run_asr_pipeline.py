@@ -41,7 +41,11 @@ class ASRPipelineRunner:
             compute_type = "float16" if use_gpu else "int8"
             
             # Use PhoWhisper CT2 converted model or fail with clear error
-            model_id = "vinai/PhoWhisper-large"
+            model_id = "./models/phowhisper-large-ct2"
+            if not os.path.exists(model_id):
+                # Fallback to name to let it try (and likely throw the fail-fast error)
+                model_id = "vinai/PhoWhisper-large"
+            
             try:
                 print(f"Loading ASR model '{model_id}' on {'cuda' if use_gpu else 'cpu'} ({compute_type})...")
                 self.asr_model = WhisperModel(model_id, device="cuda" if use_gpu else "cpu", compute_type=compute_type)

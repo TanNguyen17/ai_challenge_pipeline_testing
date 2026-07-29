@@ -26,7 +26,7 @@ def preload_all_models():
     print("\n--- 1/4 Pre-downloading PaddleOCR Weights ---")
     try:
         from paddleocr import PaddleOCR
-        ocr = PaddleOCR(use_angle_cls=True, lang="vi", show_log=False)
+        ocr = PaddleOCR(use_angle_cls=True, lang="vi", ocr_version="PP-OCRv4", show_log=False)
         del ocr
         clear_memory()
         print("✅ PaddleOCR weights cached to disk.")
@@ -37,31 +37,47 @@ def preload_all_models():
     print("\n--- 2/4 Pre-downloading Faster-Whisper ASR Weights ---")
     try:
         from faster_whisper import WhisperModel
-        for m_name in ["vinai/phowhisper-large", "medium", "base"]:
+        import subprocess
+        
+        model_path = "./models/phowhisper-large-ct2"
+        if not os.path.exists(model_path):
+            print("Converting vinai/PhoWhisper-large to CTranslate2 format...")
+            os.makedirs("./models", exist_ok=True)
             try:
-                model = WhisperModel(m_name, device="cpu", compute_type="int8")
+                subprocess.run([
+                    "ct2-transformers-converter", "--model", "vinai/PhoWhisper-large", 
+                    "--output_dir", model_path,
+                    "--copy_files", "tokenizer.json", "preprocessor_config.json"
+                ], check=True)
+                print("✅ Conversion to CT2 successful.")
+            except Exception as e:
+                print(f"⚠️ Conversion failed: {e}. You may need to run: pip install ctranslate2 transformers")
+                print("Falling back to downloading default medium model just to cache dependencies...")
+                WhisperModel("medium", device="cpu", compute_type="int8")
+
+        if os.path.exists(model_path):
+            try:
+                model = WhisperModel(model_path, device="cpu", compute_type="int8")
                 del model
                 clear_memory()
-                print(f"✅ Faster-Whisper model '{m_name}' cached to disk.")
-                break
+                print(f"✅ PhoWhisper CT2 model cached and verified at {model_path}.")
             except Exception as ex:
-                print(f"Notice loading {m_name}: {ex}")
+                print(f"Notice loading {model_path}: {ex}")
     except Exception as e:
         print(f"⚠️ Faster-Whisper pre-download notice: {e}")
 
-    # 3. Preload Ultralytics YOLO-World v2 / YOLOv8
-    print("\n--- 3/4 Pre-downloading YOLO-World Object Detection Weights ---")
+    # 3. Preload Ultralytics YOLOE
+    print("\n--- 3/4 Pre-downloading YOLOE Object Detection Weights ---")
     try:
-        from ultralytics import YOLO
-        for w_name in ["yolov8x-worldv2.pt", "yolov8x.pt"]:
-            try:
-                yolo = YOLO(w_name)
-                del yolo
-                clear_memory()
-                print(f"✅ YOLO weights '{w_name}' cached to disk.")
-                break
-            except Exception as ex:
-                print(f"Notice loading {w_name}: {ex}")
+        from ultralytics import YOLOE
+        w_name = "jameslahm/yoloe-v8l"
+        try:
+            yolo = YOLOE.from_pretrained(w_name)
+            del yolo
+            clear_memory()
+            print(f"✅ YOLOE weights '{w_name}' cached to disk.")
+        except Exception as ex:
+            print(f"❌ Failed loading {w_name}: {ex}")
     except Exception as e:
         print(f"⚠️ YOLO pre-download notice: {e}")
 
