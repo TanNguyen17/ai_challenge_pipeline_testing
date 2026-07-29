@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--video-dir", type=str, default="./data/extracted", help="Directory containing raw extracted videos")
     parser.add_argument("--output-base-dir", type=str, default="./data/processed", help="Base output directory")
     parser.add_argument("--keyframes-dir", type=str, default="./data/extracted/video batch 1/map-keyframes-aic25-b1/map-keyframes", help="Directory containing BTC keyframe CSVs")
+    parser.add_argument("--media-info-dir", type=str, default="./data/extracted/video batch 1/media-info-aic25-b1/media-info", help="Directory containing BTC media info JSONs")
     parser.add_argument("--limit", type=int, default=50, help="Number of videos to run benchmark on")
     args = parser.parse_args()
 
@@ -45,7 +46,7 @@ def main():
     # 2. Run ASR Pipeline
     print("\n--- 2/3 Running ASR Pipeline (PhoWhisper) ---")
     asr_out = os.path.join(args.output_base_dir, "asr")
-    asr_runner = ASRPipelineRunner(args.video_dir, asr_out, args.keyframes_dir)
+    asr_runner = ASRPipelineRunner(args.video_dir, asr_out, args.keyframes_dir, args.media_info_dir)
     asr_runner.run_benchmark(args.limit)
     del asr_runner
     clear_vram_cache()
