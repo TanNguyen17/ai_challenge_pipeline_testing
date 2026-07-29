@@ -92,21 +92,6 @@ class ObjectDetectionPipelineRunner:
         vert = "top" if y_center < 0.33 else ("bottom" if y_center > 0.66 else "center")
         return f"{vert}_{horiz}" if horiz != "center" or vert != "center" else "center"
 
-    def process_video_objects(self, video_path: str) -> Dict[str, Any]:
-        video_id = os.path.splitext(os.path.basename(video_path))[0]
-        start_time = time.time()
-
-        shots = self.keyframe_loader.load(video_id)
-        if not shots:
-            return {"video_id": video_id, "elapsed_sec": 0.0, "documents": []}
-
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return {"video_id": video_id, "elapsed_sec": 0.0, "documents": []}
-
-        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
-        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
-        
     def _process_yolo_batch(self, frame_batch, shot_batch, video_id, frame_width, frame_height, per_frame_documents):
         if self.yolo_model is None:
             return
@@ -153,6 +138,19 @@ class ObjectDetectionPipelineRunner:
             print(f"Error running YOLO batch for {video_id}: {ex}")
 
     def process_video_objects(self, video_path: str) -> Dict[str, Any]:
+        video_id = os.path.splitext(os.path.basename(video_path))[0]
+        start_time = time.time()
+
+        shots = self.keyframe_loader.load(video_id)
+        if not shots:
+            return {"video_id": video_id, "elapsed_sec": 0.0, "documents": []}
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return {"video_id": video_id, "elapsed_sec": 0.0, "documents": []}
+
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
 
         per_frame_documents = []
         
