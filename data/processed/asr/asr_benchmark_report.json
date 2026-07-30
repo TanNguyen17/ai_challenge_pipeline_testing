@@ -1,0 +1,9 @@
+{
+  "pipeline": "SOTA 5-Stage Vietnamese ASR (Faster-Whisper)",
+  "videos_processed": 20,
+  "total_elapsed_sec": 1156.7,
+  "avg_time_per_video_sec": 57.835,
+  "total_vad_segments": 760,
+  "total_asr_documents": 759,
+  "output_jsonl_path": "./data/processed/asr/asr_extracted_documents.jsonl"
+}

@@ -1,0 +1,9 @@
+{
+  "pipeline": "SOTA 5-Stage Object Detection (YOLO-World v2 / YOLOv8)",
+  "videos_processed": 20,
+  "total_elapsed_sec": 143.01,
+  "avg_time_per_video_sec": 7.15,
+  "total_object_documents": 10616,
+  "total_objects_detected": 12064,
+  "output_jsonl_path": "./data/processed/objects/obj_extracted_documents.jsonl"
+}

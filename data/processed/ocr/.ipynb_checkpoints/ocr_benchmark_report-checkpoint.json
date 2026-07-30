@@ -1,0 +1,9 @@
+{
+  "pipeline": "SOTA 5-Stage Video OCR (PaddleOCR)",
+  "videos_processed": 50,
+  "total_elapsed_sec": 697.5,
+  "avg_time_per_video_sec": 13.95,
+  "total_shots_extracted": 14098,
+  "total_clean_ocr_documents": 104981,
+  "output_jsonl_path": "./data/processed/ocr/ocr_extracted_documents.jsonl"
+}

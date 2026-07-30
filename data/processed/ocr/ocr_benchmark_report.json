@@ -1,0 +1,9 @@
+{
+  "pipeline": "VLM OCR (Qwen2-VL-2B)",
+  "videos_processed": 20,
+  "total_elapsed_sec": 1760.74,
+  "avg_time_per_video_sec": 88.037,
+  "total_shots_extracted": 5308,
+  "total_clean_ocr_documents": 10616,
+  "output_jsonl_path": "./data/processed/ocr/ocr_extracted_documents.jsonl"
+}
