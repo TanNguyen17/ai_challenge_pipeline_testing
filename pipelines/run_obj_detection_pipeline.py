@@ -9,6 +9,11 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 import numpy as np
+from PIL import Image
+from ram.models import ram_plus
+from ram import inference_ram_plus
+import torchvision.transforms as transforms
+
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -19,12 +24,11 @@ from extract.workers.keyframe_loader import KeyframeLoader
 
 class ObjectDetectionPipelineRunner:
     """
-    SOTA 5-Stage Video Object Detection Pipeline:
+    SOTA 4-Stage Video Object Detection Pipeline:
     Stage 1: Spatial UI Exclusion Masking (Channel Logo & Ticker Banner Masking)
-    Stage 2: YOLO-World v2 Open-Vocab Detection (Ultralytics)
-    Stage 3: Crop ROI & Spatial Location Categorization
-    Stage 4: Shot-Level Object Summarization & Count Aggregation
-    Stage 5: Database Document Schema & Elasticsearch Export
+    Stage 2: YOLO-World v2 (Open-Vocab Bbox) + RAM++ (Scene Tagging)
+    Stage 3: Shot-Level Summarization (Two-Tier Schema: od_span / shot)
+    Stage 4: Microsoft Florence-2 Reranking (Online - executed in Search API)
     """
     def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, device: str = "cuda"):
         self.video_dir = video_dir
@@ -34,6 +38,7 @@ class ObjectDetectionPipelineRunner:
         os.makedirs(output_dir, exist_ok=True)
         self.keyframe_loader = KeyframeLoader(keyframes_dir)
         self._init_yolo_model()
+        self._init_ram_model()
 
     def _init_yolo_model(self):
         """Initializes Ultralytics YOLO-World v2 / YOLOv8 SOTA Model."""
@@ -65,6 +70,33 @@ class ObjectDetectionPipelineRunner:
                 raise RuntimeError(f"❌ FATAL: Could not load YOLOE {model_weights} or set_classes: {ex}")
         except Exception as e:
             raise RuntimeError(f"❌ FATAL: Ultralytics YOLO loading error: {e}")
+
+    def _init_ram_model(self):
+        """Initializes RAM++ (Recognize Anything Model) for Scene Tagging."""
+        self.ram_model = None
+        self.ram_transform = None
+
+        try:
+            print("Loading RAM++ Model for Scene Tagging...")
+            weight_path = "ram_plus_swin_large_14m.pth"
+            if not os.path.exists(weight_path):
+                print(f"⚠️ RAM++ weights not found at {weight_path}. Scene tags will be empty. (Download: wget https://huggingface.co/xinyu1205/recognize-anything-plus-model/resolve/main/ram_plus_swin_large_14m.pth)")
+                return
+                
+            self.ram_model = ram_plus(pretrained=weight_path, image_size=384, vit='swin_l')
+            self.ram_model.eval()
+            if self.device == "cuda":
+                self.ram_model.to("cuda")
+            
+            self.ram_transform = transforms.Compose([
+                transforms.Resize((384, 384)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            self.inference_ram_plus = inference_ram_plus
+            print("✅ RAM++ loaded successfully.")
+        except ImportError:
+            print("⚠️ RAM++ dependencies not found. Run: pip install git+https://github.com/xinyu1205/recognize-anything.git torchvision")
 
     def stage1_spatial_ui_masking(self, frame: np.ndarray) -> np.ndarray:
         """Stage 1: Mask out Top-Right Channel Logo and Bottom Ticker Banner to avoid TV graphic false positives."""
@@ -125,13 +157,33 @@ class ObjectDetectionPipelineRunner:
                             "spatial_position": spatial_pos
                         })
                 
-                # Emit per-frame document
+                # Real RAM++ Scene Tagging (Open-Vocab Image Concept Tagging)
+                scene_tags = []
+                if hasattr(self, 'ram_model') and self.ram_model is not None:
+                    try:
+                        # Convert OpenCV BGR frame to RGB PIL Image
+                        rgb_frame = cv2.cvtColor(frame_batch[i], cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(rgb_frame)
+                        tensor_img = self.ram_transform(pil_img).unsqueeze(0).to("cuda" if self.device=="cuda" else "cpu")
+                        
+                        # RAM++ inference returns (tags, tags_chinese)
+                        res = self.inference_ram_plus(tensor_img, self.ram_model)
+                        if res and len(res) > 0:
+                            # RAM outputs tags as a string separated by " | "
+                            scene_tags = [tag.strip() for tag in res[0].split("|") if tag.strip()]
+                    except Exception as e:
+                        print(f"Error running RAM++ for frame {f_idx}: {e}")
+                
+                # Emit per-frame od_span document
+                time_sec = (shot.get("start_sec", 0.0) + shot.get("end_sec", 0.0)) / 2.0
                 doc = {
+                    "doc_type": "od_span",
                     "video_id": video_id,
+                    "shot_id": shot.get("keyframe_n", 0),
                     "frame_idx": f_idx,
-                    "keyframe_n": shot.get("keyframe_n", 0),
-                    "time_range": {"start_sec": shot.get("start_sec", 0.0), "end_sec": shot.get("end_sec", 0.0)},
-                    "detections": frame_detections
+                    "time_sec": round(time_sec, 2),
+                    "objects": frame_detections,
+                    "scene_tags": scene_tags
                 }
                 per_frame_documents.append(doc)
         except Exception as ex:
@@ -196,16 +248,18 @@ class ObjectDetectionPipelineRunner:
             }
             
             max_counts = defaultdict(int)
-            spatial_tokens = set()
             detected_classes = set()
+            scene_tags_combined = set()
             
             for f in frames:
                 frame_counts = defaultdict(int)
-                for det in f.get("detections", []):
+                for det in f.get("objects", []):
                     label = det["label"]
                     frame_counts[label] += 1
                     detected_classes.add(label)
-                    spatial_tokens.add(f"{label} {det['spatial_position']}")
+                
+                for tag in f.get("scene_tags", []):
+                    scene_tags_combined.add(tag)
                 
                 # Update max counts for the shot
                 for label, count in frame_counts.items():
@@ -217,15 +271,13 @@ class ObjectDetectionPipelineRunner:
                 "video_id": video_id,
                 "shot_id": shot_id,
                 "time_range": shot_time_range,
-                "max_counts": dict(max_counts),
-                "detected_classes": list(detected_classes),
-                "spatial_tokens": list(spatial_tokens)
+                "object_summary": {
+                    "detected_classes": list(detected_classes),
+                    "counts_max": dict(max_counts)
+                },
+                "scene_tags_combined": list(scene_tags_combined)
             }
             shot_documents.append(shot_doc)
-            
-        # Add doc_type to frame documents as well
-        for doc in per_frame_documents:
-            doc["doc_type"] = "frame"
 
         elapsed_sec = round(time.time() - start_time, 2)
         return {

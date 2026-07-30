@@ -2,54 +2,8 @@ import os
 import cv2
 import numpy as np
 import torch
-import torch.nn as nn
 from typing import List, Dict, Any
-
-class TransNetV2Block(nn.Module):
-    """3D Convolutional Residual Block for TransNetV2."""
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.conv3d_1 = nn.Conv3d(in_channels, out_channels, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.bn1 = nn.BatchNorm3d(out_channels)
-        self.conv3d_2 = nn.Conv3d(out_channels, out_channels, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.bn2 = nn.BatchNorm3d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.shortcut = nn.Conv3d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else nn.Identity()
-
-    def forward(self, x):
-        residual = self.shortcut(x)
-        out = self.relu(self.bn1(self.conv3d_1(x)))
-        out = self.bn2(self.conv3d_2(out))
-        out += residual
-        return self.relu(out)
-
-class TransNetV2Architecture(nn.Module):
-    """
-    Official TransNetV2 3D CNN Architecture for Shot Boundary Detection.
-    Operates on 27x48 RGB frame sequences to predict shot transition probabilities.
-    """
-    def __init__(self):
-        super().__init__()
-        self.block1 = TransNetV2Block(3, 16)
-        self.pool1 = nn.MaxPool3d(kernel_size=(1, 2, 2)) # [B, 16, T, 13, 24]
-        self.block2 = TransNetV2Block(16, 32)
-        self.pool2 = nn.MaxPool3d(kernel_size=(1, 2, 2)) # [B, 32, T, 6, 12]
-        self.block3 = TransNetV2Block(32, 64)
-        self.pool3 = nn.AdaptiveAvgPool3d((None, 1, 1)) # [B, 64, T, 1, 1]
-        
-        self.fc1 = nn.Linear(64, 32)
-        self.fc2 = nn.Linear(32, 1)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        # x: [B, C, T, H, W]
-        x = self.pool1(self.block1(x))
-        x = self.pool2(self.block2(x))
-        x = self.pool3(self.block3(x)) # [B, 64, T, 1, 1]
-        x = x.squeeze(-1).squeeze(-1).transpose(1, 2) # [B, T, 64]
-        out = torch.relu(self.fc1(x))
-        logits = self.fc2(out).squeeze(-1) # [B, T]
-        return self.sigmoid(logits)
+from transnetv2_pytorch import TransNetV2
 
 class TransNetV2Detector:
     """
@@ -65,18 +19,18 @@ class TransNetV2Detector:
     def _init_transnet_model(self):
         """Initializes TransNetV2 PyTorch 3D-CNN backbone and loads pre-trained weights."""
         try:
-            self.model = TransNetV2Architecture().to(self.device)
-            self.model.eval()
+            self.model = TransNetV2()
+            self.model.eval().to(self.device)
 
             # Load weights if available
             if os.path.exists(self.weights_path):
                 state_dict = torch.load(self.weights_path, map_location=self.device)
-                self.model.load_state_dict(state_dict, strict=False)
-                print(f"✅ TransNetV2 pre-trained 3D-CNN weights loaded from {self.weights_path}.")
+                self.model.load_state_dict(state_dict)
+                print(f"✅ TransNetV2 real PyTorch weights loaded from {self.weights_path}.")
             else:
-                print(f"✅ TransNetV2 3D-CNN architecture initialized on {self.device} (Weights cached).")
+                print(f"⚠️ TransNetV2 weights missing at {self.weights_path}. Model will run but accuracy will be degraded without real weights. Please download transnetv2-pytorch-weights.pth.")
         except Exception as e:
-            print(f"⚠️ TransNetV2 initialization notice: {e}. Using fast CPU/GPU fallback.")
+            print(f"⚠️ TransNetV2 initialization error: {e}")
 
     def detect_shots(self, video_path: str, max_keyframes: int = 15, threshold: float = 0.5) -> List[Dict[str, Any]]:
         """
@@ -109,16 +63,17 @@ class TransNetV2Detector:
         if not frames:
             return []
 
-        # Convert to 3D tensor: [B=1, C=3, T, H=27, W=48]
-        tensor_frames = np.array(frames, dtype=np.float32) / 255.0
-        tensor_frames = np.transpose(tensor_frames, (3, 0, 1, 2)) # [C, T, H, W]
-        input_tensor = torch.tensor(tensor_frames).unsqueeze(0).to(self.device) # [1, C, T, H, W]
+        # Convert to 3D tensor: [B=1, T, H=27, W=48, C=3] for official TransNetV2 PyTorch input format
+        tensor_frames = np.array(frames, dtype=np.float32)
+        # transnetv2-pytorch requires inputs of shape (B, T, H, W, C) in RGB format (0-255 uint8/float32)
+        input_tensor = torch.tensor(tensor_frames).unsqueeze(0).to(self.device) # [1, T, H, W, C]
 
         # Run TransNetV2 3D-CNN Forward Pass on GPU
         shots = []
         with torch.no_grad():
             if self.model is not None:
-                predictions = self.model(input_tensor)[0].cpu().numpy() # [T]
+                single_frame_pred, all_frames_pred = self.model(input_tensor)
+                predictions = single_frame_pred[0].cpu().numpy() # [T]
             else:
                 predictions = np.zeros(len(frames))
 
@@ -153,3 +108,36 @@ class TransNetV2Detector:
             })
 
         return shots[:max_keyframes]
+
+if __name__ == "__main__":
+    import argparse
+    import pandas as pd
+    parser = argparse.ArgumentParser(description="Run TransNetV2 to extract shot boundaries.")
+    parser.add_argument("--video", type=str, required=True, help="Path to input video")
+    parser.add_argument("--output", type=str, required=True, help="Directory to save CSV")
+    args = parser.parse_args()
+
+    detector = TransNetV2Detector()
+    shots = detector.detect_shots(args.video, max_keyframes=1000)
+    
+    # Save to BTC-compatible CSV format
+    os.makedirs(args.output, exist_ok=True)
+    video_id = os.path.splitext(os.path.basename(args.video))[0]
+    out_csv = os.path.join(args.output, f"{video_id}.csv")
+    
+    rows = []
+    cap = cv2.VideoCapture(args.video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    cap.release()
+    
+    for shot in shots:
+        rows.append({
+            "n": shot["shot_id"],
+            "pts_time": shot["start_sec"],
+            "fps": fps,
+            "frame_idx": shot["keyframe_id"]
+        })
+        
+    df = pd.DataFrame(rows)
+    df.to_csv(out_csv, index=False)
+    print(f"✅ TransNetV2 extracted {len(shots)} shots. Saved to {out_csv}")

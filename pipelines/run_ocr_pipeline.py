@@ -11,6 +11,9 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from collections import defaultdict
+import re
+from qwen_vl_utils import process_vision_info
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -23,9 +26,9 @@ from extract.workers.keyframe_loader import KeyframeLoader
 
 class OCRPipelineRunner:
     """
-    SOTA Video OCR Pipeline using Qwen2-VL-2B-Instruct:
+    SOTA Video OCR Pipeline using Qwen3-VL-7B-Instruct:
     Stage 1: Keyframe Sampling from BTC CSVs
-    Stage 2: Batched VLM Text Extraction (Qwen2-VL)
+    Stage 2: Batched VLM Text Extraction (Qwen3-VL)
     Stage 3: Elasticsearch Document Export (Span & Shot Rollup)
     """
     def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, device: str = "cuda"):
@@ -41,19 +44,18 @@ class OCRPipelineRunner:
         self.model = None
         self.processor = None
         try:
-            print("Loading Qwen2-VL-2B-Instruct...")
-            from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
-            qwen_id = "Qwen/Qwen2-VL-2B-Instruct"
+            print("Loading Qwen3-VL-7B-Instruct...")
+            qwen_id = "Qwen/Qwen3-VL-7B-Instruct"
             self.processor = AutoProcessor.from_pretrained(qwen_id)
-            self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+            self.model = AutoModelForCausalLM.from_pretrained(
                 qwen_id, 
                 torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
                 device_map="cuda" if self.device == "cuda" else "cpu"
             )
             self.model.eval()
-            print("✅ Qwen2-VL-2B-Instruct loaded on GPU for OCR.")
+            print("✅ Qwen3-VL-7B-Instruct loaded on GPU for OCR.")
         except Exception as e:
-            print(f"❌ Failed to load Qwen2-VL: {e}")
+            print(f"❌ Failed to load Qwen3-VL: {e}")
             print("Please ensure you have run: uv pip install transformers>=4.45.0 qwen-vl-utils")
 
     @staticmethod
@@ -95,12 +97,31 @@ class OCRPipelineRunner:
                 # Convert OpenCV BGR to PIL RGB
                 pil_images = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in f_batch]
                 
-                messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "Trích xuất toàn bộ văn bản tiếng Việt xuất hiện trong ảnh này. Chỉ xuất ra văn bản tiếng Việt, bỏ qua các chi tiết không phải là chữ. Không thêm bất kỳ lời giải thích nào."}]}]
-                prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                texts = []
+                image_inputs_list = []
+                video_inputs_list = []
                 
+                for pil_img in pil_images:
+                    messages = [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": pil_img},
+                            {"type": "text", "text": "Hãy trích xuất tất cả văn bản tiếng Việt xuất hiện trong bức ảnh này. Phân loại chúng thành hai nhóm: 'overlay_text' (chữ được chèn lên video như tiêu đề, tin chạy) và 'scene_text' (chữ tự nhiên trong cảnh như biển hiệu, áo). Bỏ qua các logo nhỏ. Chỉ trả về JSON format: {\"overlay_text\": \"...\", \"scene_text\": \"...\"}. Không giải thích."}
+                        ]
+                    }]
+                    text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    texts.append(text)
+                    
+                    image_inputs, video_inputs = process_vision_info(messages)
+                    if image_inputs is not None:
+                        image_inputs_list.extend(image_inputs)
+                    if video_inputs is not None:
+                        video_inputs_list.extend(video_inputs)
+
                 inputs = self.processor(
-                    text=[prompt] * len(pil_images),
-                    images=pil_images,
+                    text=texts,
+                    images=image_inputs_list if image_inputs_list else None,
+                    videos=video_inputs_list if video_inputs_list else None,
                     padding=True,
                     return_tensors="pt"
                 ).to(self.model.device)
@@ -115,40 +136,64 @@ class OCRPipelineRunner:
                 
                 for i, out_text in enumerate(output_texts):
                     ocr_text = out_text.strip()
+                    
+                    # Robust JSON parsing from VLM output
+                    cleaned_text = re.sub(r'```json\s*', '', ocr_text)
+                    cleaned_text = re.sub(r'```\s*', '', cleaned_text)
+                    try:
+                        ocr_data = json.loads(cleaned_text)
+                        if not isinstance(ocr_data, dict):
+                            ocr_data = {"overlay_text": "", "scene_text": str(ocr_data)}
+                    except json.JSONDecodeError:
+                        ocr_data = {"overlay_text": "", "scene_text": cleaned_text}
+                        
                     f_idx, shot = s_batch[i]
                     shot_id = shot["shot_id"]
                     
                     if not shots_data[shot_id]["time_range"]:
                         shots_data[shot_id]["time_range"] = {"start_sec": shot.get("start_sec", 0.0), "end_sec": shot.get("end_sec", 0.0)}
                     
-                    if ocr_text:
-                        shots_data[shot_id]["all"].append(ocr_text)
+                    shots_data[shot_id]["all"].append(ocr_data)
                         
-                        doc = {
-                            "doc_type": "span",
-                            "video_id": video_id,
-                            "shot_id": shot_id,
-                            "tracklet_id": f"TRK_{f_idx:05d}",
-                            "frame_idx": f_idx,
-                            "keyframe_n": shot.get("keyframe_n", 0),
-                            "time_range": {"start_sec": shot.get("start_sec", 0.0), "end_sec": shot.get("end_sec", 0.0)},
-                            "ocr_raw_full": ocr_text,
-                            "ocr_no_accent": self._remove_accents(ocr_text),
-                            "ocr_system": "qwen2-vl-2b",
-                            "confidence": 1.0
-                        }
-                        final_documents.append(doc)
+                    doc = {
+                        "doc_type": "span",
+                        "video_id": video_id,
+                        "shot_id": shot_id,
+                        "tracklet_id": f"TRK_{f_idx:05d}",
+                        "frame_idx": f_idx,
+                        "time_range": {"start_sec": shot.get("start_sec", 0.0), "end_sec": shot.get("end_sec", 0.0)},
+                        "ocr_data": {
+                            "overlay_text": str(ocr_data.get("overlay_text", "")),
+                            "scene_text": str(ocr_data.get("scene_text", ""))
+                        },
+                        "confidence": 0.95
+                    }
+                    final_documents.append(doc)
             except Exception as e:
-                print(f"Error processing Qwen2-VL batch for {video_id}: {e}")
+                print(f"Error processing Qwen3-VL batch for {video_id}: {e}")
 
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        
         for shot in tqdm(shots, desc=f"OCR {video_id}", leave=False):
-            f_idx = shot["keyframe_id"]
-            cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-            ret, frame = cap.read()
-            if not ret: continue
+            start_f = int(shot.get("start_sec", 0.0) * fps)
+            end_f = int(shot.get("end_sec", shot.get("start_sec", 0.0) + 3.0) * fps)
             
-            frame_batch.append(frame)
-            shot_batch.append((f_idx, shot))
+            # Sparse Multi-Frame Sampling (2 frames per shot)
+            if end_f <= start_f:
+                frame_indices = [shot["keyframe_id"]]
+            else:
+                frame_indices = [
+                    start_f + int((end_f - start_f) * 0.33),
+                    start_f + int((end_f - start_f) * 0.67)
+                ]
+            
+            for f_idx in frame_indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+                ret, frame = cap.read()
+                if not ret: continue
+                
+                frame_batch.append(frame)
+                shot_batch.append((f_idx, shot))
             
             if len(frame_batch) >= batch_size:
                 process_batch(frame_batch, shot_batch)
@@ -162,17 +207,35 @@ class OCRPipelineRunner:
 
         # Generate Shot Rollup Documents
         for shot_id, data in shots_data.items():
-            # Filter out empty texts
-            valid_texts = [t for t in data["all"] if t.strip()]
-            if not valid_texts:
+            overlay_texts = []
+            scene_texts = []
+            
+            for ocr_data in data["all"]:
+                ot = ocr_data.get("overlay_text", "").strip()
+                st = ocr_data.get("scene_text", "").strip()
+                if ot and ot not in overlay_texts:
+                    overlay_texts.append(ot)
+                if st and st not in scene_texts:
+                    scene_texts.append(st)
+                    
+            overlay_combined = " | ".join(overlay_texts)
+            scene_combined = " | ".join(scene_texts)
+            
+            if not overlay_combined and not scene_combined:
                 continue
+                
+            full_text = f"{overlay_combined} {scene_combined}".strip()
                 
             shot_doc = {
                 "doc_type": "shot",
                 "video_id": video_id,
                 "shot_id": shot_id,
                 "time_range": data["time_range"],
-                "ocr_full_combined": " | ".join(valid_texts)
+                "ocr_data_combined": {
+                    "overlay_text": overlay_combined,
+                    "scene_text": scene_combined,
+                    "ocr_no_accent_combined": self._remove_accents(full_text)
+                }
             }
             final_documents.append(shot_doc)
 
@@ -186,7 +249,7 @@ class OCRPipelineRunner:
         }
 
     def run_benchmark(self, limit_videos: int = 50):
-        print(f"\n🚀 Running VLM OCR Pipeline (Qwen2-VL-2B-Instruct) on up to {limit_videos} videos...")
+        print(f"\n🚀 Running VLM OCR Pipeline (Qwen3-VL-7B-Instruct) on up to {limit_videos} videos...")
         video_files = []
         for root, _, files in os.walk(self.video_dir):
             for f in files:
@@ -241,7 +304,7 @@ class OCRPipelineRunner:
                 total_docs += res["num_documents"]
 
         benchmark_report = {
-            "pipeline": "VLM OCR (Qwen2-VL-2B)",
+            "pipeline": "VLM OCR (Qwen3-VL-7B)",
             "videos_processed": len(video_files),
             "total_elapsed_sec": round(total_time, 2),
             "avg_time_per_video_sec": round(total_time / len(video_files), 3) if video_files else 0,

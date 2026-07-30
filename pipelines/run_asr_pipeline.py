@@ -5,6 +5,10 @@ import json
 import argparse
 import tempfile
 import subprocess
+import torch
+import whisperx
+from transformers import AutoProcessor, AutoModelForCausalLM
+
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -15,12 +19,11 @@ from extract.workers.keyframe_loader import KeyframeLoader
 
 class ASRPipelineRunner:
     """
-    SOTA 5-Stage Vietnamese Video ASR Pipeline:
-    Stage 1: Silero VAD (Voice Activity Detection & Music/Noise Filtering)
-    Stage 2: PhoWhisper-large / Faster-Whisper CTranslate2 Engine
-    Stage 3: Word-level Timestamp Alignment
-    Stage 4: Inverse Text Normalization (ITN) & Hot-word Rules
-    Stage 5: Temporal Sliding Window (20s) & Shot-Mapping Export
+    SOTA 4-Stage Vietnamese Video ASR Pipeline:
+    Stage 1: WhisperX VAD (Voice Activity Detection Chunking)
+    Stage 2: Qwen3-ASR-1.7B (High-throughput Specialized ASR)
+    Stage 3: WhisperX Phoneme/Word-level Timestamp Alignment
+    Stage 4: Two-Tier DB Schema Export (asr_span / shot)
     """
     def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, media_info_dir: str, device: str = "cuda"):
         self.video_dir = video_dir
@@ -31,32 +34,45 @@ class ASRPipelineRunner:
         os.makedirs(output_dir, exist_ok=True)
         self.keyframe_loader = KeyframeLoader(keyframes_dir)
         self._init_asr_model()
+        self._init_whisperx()
 
     def _init_asr_model(self):
-        """Initializes Faster-Whisper / PhoWhisper ASR model engine."""
+        """Initializes Qwen3-ASR-1.7B ASR model engine."""
         self.asr_model = None
+        self.asr_processor = None
+        self.vad_model = None
         try:
-            from faster_whisper import WhisperModel
+            print("Loading Qwen3-ASR-1.7B...")
+            model_id = "Qwen/Qwen3-ASR-1.7B"
             use_gpu = self.device == "cuda"
-            compute_type = "float16" if use_gpu else "int8"
             
-            # Use PhoWhisper CT2 converted model or fail with clear error
-            model_id = "./models/phowhisper-large-ct2"
-            if not os.path.exists(model_id):
-                # Fallback to name to let it try (and likely throw the fail-fast error)
-                model_id = "vinai/PhoWhisper-large"
+            self.asr_processor = AutoProcessor.from_pretrained(model_id)
+            self.asr_model = AutoModelForCausalLM.from_pretrained(
+                model_id, 
+                torch_dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
+                device_map="cuda" if use_gpu else "cpu"
+            )
+            self.asr_model.eval()
+            print(f"✅ ASR Model '{model_id}' loaded successfully.")
             
-            try:
-                print(f"Loading ASR model '{model_id}' on {'cuda' if use_gpu else 'cpu'} ({compute_type})...")
-                self.asr_model = WhisperModel(model_id, device="cuda" if use_gpu else "cpu", compute_type=compute_type)
-                print(f"✅ ASR Model '{model_id}' loaded successfully.")
-            except Exception as e:
-                raise RuntimeError(
-                    f"❌ FATAL: Cannot load ASR model '{model_id}': {e}\n"
-                    f"Ensure you are using the CT2 converted model path or run: ct2-whisper-converter --model {model_id} --output_dir ./models/phowhisper-ct2"
-                )
+            # Load VAD model from WhisperX for robust chunking
+            print("Loading WhisperX VAD model...")
+            self.vad_model = whisperx.vad.load_vad_model(torch.device(self.device))
+            print("✅ VAD Model loaded.")
+                
         except Exception as e:
-            raise RuntimeError(f"❌ FATAL: Faster-Whisper engine failed to initialize: {e}")
+            raise RuntimeError(f"❌ FATAL: Qwen3-ASR engine failed to initialize: {e}")
+
+    def _init_whisperx(self):
+        """Initializes WhisperX Alignment Model for exact Phoneme/Word timestamps."""
+        self.align_model = None
+        self.align_metadata = None
+        try:
+            print("Loading WhisperX Alignment Model...")
+            self.align_model, self.align_metadata = whisperx.load_align_model(language_code="vi", device=self.device)
+            print("✅ WhisperX Alignment Model loaded successfully.")
+        except Exception as e:
+            print(f"⚠️ Warning: Cannot load WhisperX alignment model: {e}")
 
     def _extract_audio_wav(self, video_path: str, temp_wav_path: str) -> bool:
         """Extracts 16kHz mono WAV audio track from video file using ffmpeg/moviepy."""
@@ -88,88 +104,156 @@ class ASRPipelineRunner:
 
         if audio_extracted and self.asr_model is not None:
             try:
-                # 1. Hot-word boosting from BTC media-info
-                hotword_prompt = ""
-                media_info_path = os.path.join(self.media_info_dir, f"{video_id}.json")
-                if os.path.exists(media_info_path):
-                    try:
-                        with open(media_info_path, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                            keywords = data.get("keywords", [])
-                            if keywords:
-                                # Create a natural sentence prompt containing keywords
-                                hotword_prompt = "Đây là video về " + ", ".join(keywords[:10]) + "."
-                    except Exception as e:
-                        print(f"Warning: Could not read media-info for {video_id}: {e}")
-
-                segments, info = self.asr_model.transcribe(
-                    temp_wav_path,
-                    beam_size=5,
-                    language="vi",
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500),
-                    word_timestamps=True,
-                    initial_prompt=hotword_prompt if hotword_prompt else None
-                )
-
-                segment_list = list(segments)
-                vad_segment_count = len(segment_list)
-
-                for idx, seg in enumerate(segment_list):
-                    raw_text = seg.text.strip()
-                    if not raw_text:
+                # 1. VAD Chunking
+                audio_np = whisperx.load_audio(temp_wav_path)
+                vad_segments = whisperx.vad.find_vad(audio_np, self.vad_model)
+                # Ensure segments are manageable (e.g. max 30 seconds)
+                vad_segments = whisperx.vad.merge_chunks(vad_segments, chunk_size=30)
+                
+                vad_segment_count = len(vad_segments)
+                wx_segments = []
+                
+                # 2. Qwen3-ASR Transcription
+                for seg in vad_segments:
+                    start_sec = seg["start"]
+                    end_sec = seg["end"]
+                    
+                    # Slice audio array (16kHz)
+                    start_sample = int(start_sec * 16000)
+                    end_sample = int(end_sec * 16000)
+                    chunk_audio = audio_np[start_sample:end_sample]
+                    
+                    if len(chunk_audio) < 1600: # Skip very short noise (<0.1s)
                         continue
                         
-                    # 2. Hallucination Filtering (Repeated word loops)
+                    conversation = [
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": [
+                            {"type": "audio", "audio_url": "placeholder.wav"},
+                            {"type": "text", "text": "Trích xuất chính xác văn bản tiếng Việt từ đoạn âm thanh này. Chỉ trả về văn bản, không giải thích, không dịch."}
+                        ]}
+                    ]
+                    
+                    prompt = self.asr_processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
+                    inputs = self.asr_processor(
+                        text=prompt,
+                        audios=chunk_audio,
+                        return_tensors="pt",
+                        sampling_rate=16000
+                    ).to(self.device)
+                    
+                    with torch.no_grad():
+                        generated_ids = self.asr_model.generate(**inputs, max_length=256)
+                        
+                    generated_ids = generated_ids[:, inputs.input_ids.size(1):]
+                    transcription = self.asr_processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+                    
+                    raw_text = transcription.strip()
+                    if not raw_text: continue
+                    
+                    # Hallucination Filtering (Repeated word loops)
                     words_list = raw_text.split()
                     if len(words_list) > 10:
-                        # If the same word appears too many times consecutively, it's a hallucination loop
                         is_hallucination = False
                         for i in range(len(words_list) - 5):
                             if words_list[i] == words_list[i+1] == words_list[i+2] == words_list[i+3]:
                                 is_hallucination = True
                                 break
                         if is_hallucination:
-                            print(f"⚠️ Filtered hallucination loop in {video_id} at {seg.start}s")
+                            print(f"⚠️ Filtered hallucination loop in {video_id} at {start_sec}s")
                             continue
+                            
+                    wx_segments.append({
+                        "text": raw_text,
+                        "start": start_sec,
+                        "end": end_sec,
+                        "words": []
+                    })
 
-                    words = []
-                    if getattr(seg, 'words', None):
-                        for w in seg.words:
-                            words.append({
-                                "word": w.word,
-                                "start": round(w.start, 2),
-                                "end": round(w.end, 2),
-                                "probability": round(w.probability, 3)
+                word_level_data = []
+                
+                # 3. WhisperX Alignment (Real SOTA Phoneme alignment)
+                if hasattr(self, 'align_model') and self.align_model is not None and wx_segments:
+                    try:
+                        audio_np = whisperx.load_audio(temp_wav_path)
+                        result = whisperx.align(wx_segments, self.align_model, self.align_metadata, audio_np, self.device, return_char_alignments=False)
+                        for seg in result["segments"]:
+                            for w in seg.get("words", []):
+                                if "start" in w and "end" in w:
+                                    word_level_data.append({
+                                        "word": w["word"],
+                                        "start": w["start"],
+                                        "end": w["end"],
+                                        "score": w.get("score", 0.9)
+                                    })
+                    except Exception as e:
+                        print(f"WhisperX alignment error for {video_id}: {e}")
+                
+                # Fallback to chunk timestamps if WhisperX fails
+                if not word_level_data:
+                    for seg in wx_segments:
+                        # Since we don't have exact word timestamps from Qwen3-ASR, distribute time evenly
+                        words = seg["text"].split()
+                        if not words: continue
+                        duration = seg["end"] - seg["start"]
+                        w_dur = duration / len(words)
+                        for idx, w in enumerate(words):
+                            word_level_data.append({
+                                "word": w,
+                                "start": round(seg["start"] + idx * w_dur, 2),
+                                "end": round(seg["start"] + (idx + 1) * w_dur, 2),
+                                "score": 0.9
                             })
-
-                    unaccented = self._remove_accents(raw_text)
-
-                    # Map to BTC keyframes using KeyframeLoader
-                    keyframes = self.keyframe_loader.load(video_id)
-                    mapped_frame_indices = []
-                    mapped_shot_ids = []
-                    for kf in keyframes:
-                        # If keyframe time overlaps with ASR segment
-                        if seg.start <= kf["start_sec"] <= seg.end:
-                            mapped_frame_indices.append(kf["keyframe_id"])
-                            mapped_shot_ids.append(kf["keyframe_n"])
-
-                    doc = {
+                            
+                # 4. Shot Mapping & Two-Tier Document Construction
+                keyframes = self.keyframe_loader.load(video_id)
+                shots_data = {}
+                
+                for kf in keyframes:
+                    shot_id = kf["keyframe_n"]
+                    if shot_id not in shots_data:
+                        shots_data[shot_id] = {
+                            "time_range": {"start_sec": kf.get("start_sec", 0.0), "end_sec": kf.get("end_sec", 0.0)},
+                            "words": []
+                        }
+                    else:
+                        shots_data[shot_id]["time_range"]["start_sec"] = min(shots_data[shot_id]["time_range"]["start_sec"], kf.get("start_sec", 0.0))
+                        shots_data[shot_id]["time_range"]["end_sec"] = max(shots_data[shot_id]["time_range"]["end_sec"], kf.get("end_sec", 0.0))
+                        
+                for w in word_level_data:
+                    for shot_id, s_data in shots_data.items():
+                        # Find which shot this word belongs to
+                        if s_data["time_range"]["start_sec"] <= w["start"] <= s_data["time_range"]["end_sec"]:
+                            s_data["words"].append(w)
+                            
+                            doc = {
+                                "doc_type": "asr_span",
+                                "video_id": video_id,
+                                "shot_id": shot_id,
+                                "word": w["word"],
+                                "time_range": {"start_sec": round(w["start"], 2), "end_sec": round(w["end"], 2)},
+                                "confidence": round(w["score"], 3)
+                            }
+                            documents.append(doc)
+                            break
+                            
+                for shot_id, s_data in shots_data.items():
+                    if not s_data["words"]:
+                        continue
+                    
+                    full_transcript = " ".join([w["word"] for w in s_data["words"]])
+                    
+                    shot_doc = {
+                        "doc_type": "shot",
                         "video_id": video_id,
-                        "window_id": idx,
-                        "time_range": {"start_sec": round(seg.start, 2), "end_sec": round(seg.end, 2)},
-                        "mapped_frame_indices": mapped_frame_indices,
-                        "mapped_shot_ids": list(set(mapped_shot_ids)),
-                        "asr_data": {
-                            "transcript_normalized": raw_text,
-                            "transcript_raw": raw_text.lower(),
-                            "asr_no_accent": unaccented
-                        },
-                        "word_timestamps": words,
-                        "confidence_score": round(exp_prob(seg.avg_logprob), 3) if hasattr(seg, "avg_logprob") else 0.90
+                        "shot_id": shot_id,
+                        "time_range": s_data["time_range"],
+                        "asr_data_combined": {
+                            "transcript": full_transcript,
+                            "asr_no_accent": self._remove_accents(full_transcript)
+                        }
                     }
-                    documents.append(doc)
+                    documents.append(shot_doc)
 
             except Exception as ex:
                 print(f"Error transcribing audio for {video_id}: {ex}")
@@ -208,7 +292,7 @@ class ASRPipelineRunner:
         return s
 
     def run_benchmark(self, limit_videos: int = 50):
-        print(f"\n🚀 Running SOTA ASR Pipeline (PhoWhisper / Faster-Whisper) on up to {limit_videos} videos...")
+        print(f"\n🚀 Running SOTA ASR Pipeline (Qwen3-ASR) on up to {limit_videos} videos...")
         video_files = []
         for root, _, files in os.walk(self.video_dir):
             for f in files:
@@ -263,7 +347,7 @@ class ASRPipelineRunner:
                 total_docs += res.get("num_documents", 0)
 
         benchmark_report = {
-            "pipeline": "SOTA 5-Stage Vietnamese ASR (Faster-Whisper)",
+            "pipeline": "SOTA 4-Stage Vietnamese ASR (Qwen3-ASR)",
             "videos_processed": len(video_files),
             "total_elapsed_sec": round(total_time, 2),
             "avg_time_per_video_sec": round(total_time / len(video_files), 3) if video_files else 0,
