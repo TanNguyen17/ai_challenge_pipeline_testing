@@ -18,9 +18,9 @@ Theo các nghiên cứu mới nhất về **Video Document Understanding** (như
 [VIDEO GỐC MP4]
        │
        ▼
-[STAGE 1: TransNetV2 & Multi-Frame Sampling]
+[STAGE 1: TransNetV2 & Sparse Multi-Frame Sampling]
        └── Dùng mô hình Deep Learning `TransNetV2` cắt video thành các Shot chính xác. 
-       └── Trích xuất 1-2 Keyframes đại diện mỗi Shot (thay vì phụ thuộc 1 frame duy nhất từ BTC để tránh miss thông tin).
+       └── Lấy mẫu thưa (Sparse Sampling) 2-3 Keyframes trải đều mỗi Shot. (Theo báo cáo nghiên cứu của Qwen-VL và Video-LLaVA, chiến lược "Sparse Sampling" cân bằng hoàn hảo giữa chi phí tính toán khổng lồ của VLM và rủi ro mất mát thông tin chữ cuộn, thay vì chỉ dùng 1 frame cố định từ BTC rất dễ trúng vào frame mờ hoặc flash-frame).
        │
        ▼
 [STAGE 2: Spatial UI Exclusion Masking (Chống Hallucination)]
