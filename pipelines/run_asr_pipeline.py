@@ -46,11 +46,12 @@ class ASRPipelineRunner:
             model_id = "Qwen/Qwen3-ASR-1.7B"
             use_gpu = self.device == "cuda"
             
-            self.asr_processor = AutoProcessor.from_pretrained(model_id)
+            self.asr_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
             self.asr_model = AutoModelForCausalLM.from_pretrained(
                 model_id, 
                 torch_dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
-                device_map="cuda" if use_gpu else "cpu"
+                device_map="cuda" if use_gpu else "cpu",
+                trust_remote_code=True
             )
             self.asr_model.eval()
             print(f"✅ ASR Model '{model_id}' loaded successfully.")

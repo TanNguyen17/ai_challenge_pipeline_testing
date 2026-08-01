@@ -10,6 +10,10 @@ import numpy as np
 from tqdm import tqdm
 import numpy as np
 from PIL import Image
+import transformers.modeling_utils
+if not hasattr(transformers.modeling_utils, 'apply_chunking_to_forward'):
+    transformers.modeling_utils.apply_chunking_to_forward = lambda *args, **kwargs: None
+
 from ram.models import ram_plus
 from ram import inference_ram_plus
 import torchvision.transforms as transforms

@@ -23,22 +23,23 @@ def preload_all_models():
     print("==========================================================================")
 
     # 1. Preload Qwen3-VL (OCR)
-    print("\n--- 1/7 Pre-downloading Qwen3-VL-7B-Instruct Weights (OCR) ---")
+    print("\n--- 1/7 Pre-downloading Qwen3-VL-8B-Instruct Weights (OCR) ---")
     try:
         from transformers import AutoModelForCausalLM, AutoProcessor
         import torch
-        qwen_id = "Qwen/Qwen3-VL-7B-Instruct"
+        qwen_id = "Qwen/Qwen3-VL-8B-Instruct"
         print(f"Loading {qwen_id}...")
-        processor = AutoProcessor.from_pretrained(qwen_id)
+        processor = AutoProcessor.from_pretrained(qwen_id, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
             qwen_id, 
             torch_dtype=torch.float16, 
-            device_map="auto"
+            device_map="auto",
+            trust_remote_code=True
         )
         del model
         del processor
         clear_memory()
-        print("✅ Qwen3-VL-7B-Instruct cached to disk.")
+        print("✅ Qwen3-VL-8B-Instruct cached to disk.")
     except Exception as e:
         print(f"❌ Failed caching Qwen3-VL: {e}")
 
@@ -49,11 +50,12 @@ def preload_all_models():
         import torch
         model_id = "Qwen/Qwen3-ASR-1.7B"
         print(f"Loading {model_id}...")
-        processor = AutoProcessor.from_pretrained(model_id)
+        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=torch.float16,
-            device_map="auto"
+            device_map="auto",
+            trust_remote_code=True
         )
         del model
         del processor
@@ -101,6 +103,9 @@ def preload_all_models():
             
         # Optional: verify it loads
         try:
+            import transformers.modeling_utils
+            if not hasattr(transformers.modeling_utils, 'apply_chunking_to_forward'):
+                transformers.modeling_utils.apply_chunking_to_forward = lambda *args, **kwargs: None
             from ram.models import ram_plus
             model = ram_plus(pretrained=weight_path, image_size=384, vit='swin_l')
             del model
@@ -146,6 +151,7 @@ def preload_all_models():
     print("\n--- 7/7 Pre-downloading WhisperX VAD & Alignment Models ---")
     try:
         import whisperx
+        import whisperx.vad
         import torch
         print("Preloading WhisperX VAD Model...")
         vad_model = whisperx.vad.load_vad_model(torch.device("cpu"))
