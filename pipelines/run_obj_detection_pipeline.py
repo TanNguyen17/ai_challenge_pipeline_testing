@@ -23,7 +23,7 @@ if not hasattr(transformers.modeling_utils, 'find_pruneable_heads_and_indices'):
         transformers.modeling_utils.prune_linear_layer = lambda *args, **kwargs: None
 
 from ram.models import ram_plus
-from ram import inference_ram_plus
+from ram import inference_ram as inference_ram_plus
 import torchvision.transforms as transforms
 
 if hasattr(sys.stdout, "reconfigure"):
