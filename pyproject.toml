@@ -65,6 +65,9 @@ build-backend = "hatchling.build"
 packages = ["app", "pipelines", "eval"]
 
 [tool.uv]
+environments = [
+    "sys_platform == 'linux'",
+]
 override-dependencies = [
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
