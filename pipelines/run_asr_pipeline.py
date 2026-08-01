@@ -7,6 +7,7 @@ import tempfile
 import subprocess
 import torch
 import whisperx
+import whisperx.vad
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
