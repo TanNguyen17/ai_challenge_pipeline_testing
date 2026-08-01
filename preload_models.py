@@ -46,19 +46,20 @@ def preload_all_models():
     # 2. Preload Qwen3-ASR
     print("\n--- 2/7 Pre-downloading Qwen3-ASR-1.7B Weights (ASR) ---")
     try:
-        from transformers import AutoProcessor, Qwen3ASRForConditionalGeneration
+        try:
+            import qwen_asr
+        except ImportError:
+            print("⚠️ qwen-asr package not found. Model caching will fail.")
+        from qwen_asr import Qwen3ASRModel
         import torch
         model_id = "Qwen/Qwen3-ASR-1.7B"
         print(f"Loading {model_id}...")
-        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        model = Qwen3ASRForConditionalGeneration.from_pretrained(
+        model = Qwen3ASRModel.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            trust_remote_code=True
+            dtype=torch.float16,
+            device_map="auto"
         )
         del model
-        del processor
         clear_memory()
         print(f"✅ {model_id} cached to disk.")
     except Exception as e:

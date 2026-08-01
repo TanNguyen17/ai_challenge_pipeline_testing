@@ -7,7 +7,6 @@ import tempfile
 import subprocess
 import torch
 import whisperx
-from transformers import AutoProcessor, AutoModelForCausalLM, Qwen3ASRForConditionalGeneration
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -39,21 +38,22 @@ class ASRPipelineRunner:
     def _init_asr_model(self):
         """Initializes Qwen3-ASR-1.7B ASR model engine."""
         self.asr_model = None
-        self.asr_processor = None
         self.vad_model = None
         try:
-            print("Loading Qwen3-ASR-1.7B...")
+            print("Loading Qwen3-ASR-1.7B via qwen_asr...")
+            try:
+                from qwen_asr import Qwen3ASRModel
+            except ImportError:
+                raise RuntimeError("qwen-asr package is not installed. Please install it.")
+                
             model_id = "Qwen/Qwen3-ASR-1.7B"
             use_gpu = self.device == "cuda"
             
-            self.asr_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-            self.asr_model = Qwen3ASRForConditionalGeneration.from_pretrained(
+            self.asr_model = Qwen3ASRModel.from_pretrained(
                 model_id, 
-                torch_dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
+                dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
                 device_map="cuda" if use_gpu else "cpu",
-                trust_remote_code=True
             )
-            self.asr_model.eval()
             print(f"✅ ASR Model '{model_id}' loaded successfully.")
             
             # Load VAD model from WhisperX for robust chunking
@@ -127,27 +127,12 @@ class ASRPipelineRunner:
                     if len(chunk_audio) < 1600: # Skip very short noise (<0.1s)
                         continue
                         
-                    conversation = [
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": [
-                            {"type": "audio", "audio_url": "placeholder.wav"},
-                            {"type": "text", "text": "Trích xuất chính xác văn bản tiếng Việt từ đoạn âm thanh này. Chỉ trả về văn bản, không giải thích, không dịch."}
-                        ]}
-                    ]
-                    
-                    prompt = self.asr_processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
-                    inputs = self.asr_processor(
-                        text=prompt,
-                        audios=chunk_audio,
-                        return_tensors="pt",
-                        sampling_rate=16000
-                    ).to(self.device)
-                    
-                    with torch.no_grad():
-                        generated_ids = self.asr_model.generate(**inputs, max_length=256)
-                        
-                    generated_ids = generated_ids[:, inputs.input_ids.size(1):]
-                    transcription = self.asr_processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+                    # Use official qwen_asr wrapper which handles the thinker->model mapping
+                    res = self.asr_model.transcribe(
+                        audio=(chunk_audio, 16000),
+                        language="Vietnamese"
+                    )
+                    transcription = res[0].text
                     
                     raw_text = transcription.strip()
                     if not raw_text: continue

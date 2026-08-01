@@ -54,7 +54,8 @@ dependencies = [
     "supervision>=0.19.0",
     "ram @ git+https://github.com/xinyu1205/recognize-anything.git",
     "whisperx @ git+https://github.com/m-bain/whisperx.git",
-    "transnetv2-pytorch>=1.0.0"
+    "transnetv2-pytorch>=1.0.0",
+    "qwen-asr>=0.1.0"
 ]
 
 [build-system]
