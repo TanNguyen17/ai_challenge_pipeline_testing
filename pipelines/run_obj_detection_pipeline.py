@@ -15,10 +15,12 @@ if not hasattr(transformers.modeling_utils, 'apply_chunking_to_forward'):
     transformers.modeling_utils.apply_chunking_to_forward = lambda *args, **kwargs: None
 if not hasattr(transformers.modeling_utils, 'find_pruneable_heads_and_indices'):
     try:
-        from transformers.pytorch_utils import find_pruneable_heads_and_indices
+        from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer
         transformers.modeling_utils.find_pruneable_heads_and_indices = find_pruneable_heads_and_indices
+        transformers.modeling_utils.prune_linear_layer = prune_linear_layer
     except ImportError:
         transformers.modeling_utils.find_pruneable_heads_and_indices = lambda *args, **kwargs: (set(), [])
+        transformers.modeling_utils.prune_linear_layer = lambda *args, **kwargs: None
 
 from ram.models import ram_plus
 from ram import inference_ram_plus
