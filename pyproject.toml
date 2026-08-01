@@ -52,7 +52,7 @@ dependencies = [
     "scenedetect>=0.6.2",
     "tqdm>=4.66.0",
     "supervision>=0.19.0",
-    "recognize-anything @ git+https://github.com/xinyu1205/recognize-anything.git",
+    "ram @ git+https://github.com/xinyu1205/recognize-anything.git",
     "whisperx @ git+https://github.com/m-bain/whisperx.git",
     "transnetv2-pytorch>=1.0.0"
 ]
