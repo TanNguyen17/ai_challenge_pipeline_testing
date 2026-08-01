@@ -55,7 +55,8 @@ dependencies = [
     "ram @ git+https://github.com/xinyu1205/recognize-anything.git",
     "whisperx @ git+https://github.com/m-bain/whisperx.git",
     "transnetv2-pytorch>=1.0.0",
-    "qwen-asr"
+    "qwen-asr",
+    "numba>=0.59.0"
 ]
 
 [build-system]
