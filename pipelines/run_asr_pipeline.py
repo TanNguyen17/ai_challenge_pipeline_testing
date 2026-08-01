@@ -7,7 +7,7 @@ import tempfile
 import subprocess
 import torch
 import whisperx
-from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers import AutoProcessor, AutoModelForCausalLM, Qwen3ASRForConditionalGeneration
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -47,7 +47,7 @@ class ASRPipelineRunner:
             use_gpu = self.device == "cuda"
             
             self.asr_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-            self.asr_model = AutoModelForCausalLM.from_pretrained(
+            self.asr_model = Qwen3ASRForConditionalGeneration.from_pretrained(
                 model_id, 
                 torch_dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
                 device_map="cuda" if use_gpu else "cpu",

@@ -25,12 +25,12 @@ def preload_all_models():
     # 1. Preload Qwen3-VL (OCR)
     print("\n--- 1/7 Pre-downloading Qwen3-VL-8B-Instruct Weights (OCR) ---")
     try:
-        from transformers import AutoModelForCausalLM, AutoProcessor
+        from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
         import torch
         qwen_id = "Qwen/Qwen3-VL-8B-Instruct"
         print(f"Loading {qwen_id}...")
         processor = AutoProcessor.from_pretrained(qwen_id, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
             qwen_id, 
             torch_dtype=torch.float16, 
             device_map="auto",
@@ -46,12 +46,12 @@ def preload_all_models():
     # 2. Preload Qwen3-ASR
     print("\n--- 2/7 Pre-downloading Qwen3-ASR-1.7B Weights (ASR) ---")
     try:
-        from transformers import AutoProcessor, AutoModelForCausalLM
+        from transformers import AutoProcessor, Qwen3ASRForConditionalGeneration
         import torch
         model_id = "Qwen/Qwen3-ASR-1.7B"
         print(f"Loading {model_id}...")
         processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
+        model = Qwen3ASRForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.float16,
             device_map="auto",

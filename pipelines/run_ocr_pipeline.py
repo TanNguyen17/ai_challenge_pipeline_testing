@@ -13,7 +13,7 @@ from PIL import Image
 from collections import defaultdict
 import re
 from qwen_vl_utils import process_vision_info
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoProcessor, Qwen3VLForConditionalGeneration
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -47,7 +47,7 @@ class OCRPipelineRunner:
             print("Loading Qwen3-VL-8B-Instruct...")
             qwen_id = "Qwen/Qwen3-VL-8B-Instruct"
             self.processor = AutoProcessor.from_pretrained(qwen_id, trust_remote_code=True)
-            self.model = AutoModelForCausalLM.from_pretrained(
+            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
                 qwen_id, 
                 torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
                 device_map="cuda" if self.device == "cuda" else "cpu",
