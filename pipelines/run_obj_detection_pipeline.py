@@ -13,6 +13,12 @@ from PIL import Image
 import transformers.modeling_utils
 if not hasattr(transformers.modeling_utils, 'apply_chunking_to_forward'):
     transformers.modeling_utils.apply_chunking_to_forward = lambda *args, **kwargs: None
+if not hasattr(transformers.modeling_utils, 'find_pruneable_heads_and_indices'):
+    try:
+        from transformers.pytorch_utils import find_pruneable_heads_and_indices
+        transformers.modeling_utils.find_pruneable_heads_and_indices = find_pruneable_heads_and_indices
+    except ImportError:
+        transformers.modeling_utils.find_pruneable_heads_and_indices = lambda *args, **kwargs: (set(), [])
 
 from ram.models import ram_plus
 from ram import inference_ram_plus
