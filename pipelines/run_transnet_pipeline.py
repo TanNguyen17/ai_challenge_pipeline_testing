@@ -11,17 +11,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from extract.workers.transnet import TransNetV2Detector
 
-def main():
-    parser = argparse.ArgumentParser(description="Batch extract keyframes using TransNetV2")
-    parser.add_argument("--video-dir", type=str, required=True, help="Directory containing raw videos")
-    parser.add_argument("--output-dir", type=str, required=True, help="Directory to save the extracted keyframe CSVs")
-    args = parser.parse_args()
-
-    os.makedirs(args.output_dir, exist_ok=True)
-    video_files = glob.glob(os.path.join(args.video_dir, "*.mp4"))
+def run_transnet(video_dir: str, output_dir: str):
+    os.makedirs(output_dir, exist_ok=True)
+    video_files = glob.glob(os.path.join(video_dir, "*.mp4"))
     
     if not video_files:
-        print(f"No .mp4 files found in {args.video_dir}")
+        print(f"No .mp4 files found in {video_dir}")
         return
 
     print(f"Found {len(video_files)} videos. Loading TransNetV2 model...")
@@ -29,7 +24,7 @@ def main():
 
     for video_path in tqdm(video_files, desc="Extracting Keyframes"):
         video_id = os.path.splitext(os.path.basename(video_path))[0]
-        out_csv = os.path.join(args.output_dir, f"{video_id}.csv")
+        out_csv = os.path.join(output_dir, f"{video_id}.csv")
         
         if os.path.exists(out_csv):
             print(f"Skipping {video_id}, already exists.")
@@ -57,7 +52,15 @@ def main():
         df = pd.DataFrame(rows)
         df.to_csv(out_csv, index=False)
 
-    print(f"\n✅ Finished extracting {len(video_files)} videos. Keyframe CSVs saved to {args.output_dir}")
+    print(f"\n✅ Finished extracting {len(video_files)} videos. Keyframe CSVs saved to {output_dir}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Batch extract keyframes using TransNetV2")
+    parser.add_argument("--video-dir", type=str, required=True, help="Directory containing raw videos")
+    parser.add_argument("--output-dir", type=str, required=True, help="Directory to save the extracted keyframe CSVs")
+    args = parser.parse_args()
+    
+    run_transnet(args.video_dir, args.output_dir)
 
 if __name__ == "__main__":
     main()

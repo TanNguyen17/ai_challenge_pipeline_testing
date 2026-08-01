@@ -21,12 +21,14 @@ def clear_vram_cache():
 from run_ocr_pipeline import OCRPipelineRunner
 from run_asr_pipeline import ASRPipelineRunner
 from run_obj_detection_pipeline import ObjectDetectionPipelineRunner
+from run_transnet_pipeline import run_transnet
 
 def main():
     parser = argparse.ArgumentParser(description="Master Execution Runner for Multimodal Video Retrieval Pipelines")
     parser.add_argument("--video-dir", type=str, default="./data/extracted", help="Directory containing raw extracted videos")
     parser.add_argument("--output-base-dir", type=str, default="./data/processed", help="Base output directory")
     parser.add_argument("--keyframes-dir", type=str, default="./data/extracted/video batch 1/map-keyframes-aic25-b1/map-keyframes", help="Directory containing BTC keyframe CSVs")
+    parser.add_argument("--extract-keyframes", action="store_true", help="Run TransNetV2 to extract keyframes instead of using pre-computed ones")
     parser.add_argument("--media-info-dir", type=str, default="./data/extracted/video batch 1/media-info-aic25-b1/media-info", help="Directory containing BTC media info JSONs")
     parser.add_argument("--limit", type=int, default=50, help="Number of videos to run benchmark on")
     args = parser.parse_args()
@@ -35,8 +37,14 @@ def main():
     print("🚀 STARTING SEQUENTIAL MULTIMODAL EXTRACTION (LIGHTWEIGHT MEMORY MANAGEMENT)")
     print("==========================================================================")
 
-    # 1. Run OCR Pipeline
-    print("\n--- 1/3 Running OCR Pipeline (PaddleOCR) ---")
+    if args.extract_keyframes:
+        print("\n--- 0/4 Running TransNetV2 Keyframe Extraction ---")
+        run_transnet(args.video_dir, args.keyframes_dir)
+        clear_vram_cache()
+        print("\n--- 1/4 Running OCR Pipeline (PaddleOCR) ---")
+    else:
+        print("\n--- 1/3 Running OCR Pipeline (PaddleOCR) ---")
+        
     ocr_out = os.path.join(args.output_base_dir, "ocr")
     ocr_runner = OCRPipelineRunner(args.video_dir, ocr_out, args.keyframes_dir)
     ocr_runner.run_benchmark(args.limit)
