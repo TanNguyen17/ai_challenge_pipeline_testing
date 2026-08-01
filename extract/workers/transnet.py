@@ -64,8 +64,8 @@ class TransNetV2Detector:
             return []
 
         # Convert to 3D tensor: [B=1, T, H=27, W=48, C=3] for official TransNetV2 PyTorch input format
-        tensor_frames = np.array(frames, dtype=np.float32)
-        # transnetv2-pytorch requires inputs of shape (B, T, H, W, C) in RGB format (0-255 uint8/float32)
+        tensor_frames = np.array(frames, dtype=np.uint8)
+        # transnetv2-pytorch requires inputs of shape (B, T, H, W, C) in RGB format (0-255 uint8)
         input_tensor = torch.tensor(tensor_frames).unsqueeze(0).to(self.device) # [1, T, H, W, C]
 
         # Run TransNetV2 3D-CNN Forward Pass on GPU
