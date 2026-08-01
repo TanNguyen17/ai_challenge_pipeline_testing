@@ -32,7 +32,7 @@ def preload_all_models():
         processor = AutoProcessor.from_pretrained(qwen_id, trust_remote_code=True)
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             qwen_id, 
-            torch_dtype=torch.float16, 
+            dtype=torch.float16, 
             device_map="auto",
             trust_remote_code=True
         )

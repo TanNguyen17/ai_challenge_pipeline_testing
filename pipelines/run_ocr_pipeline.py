@@ -49,7 +49,7 @@ class OCRPipelineRunner:
             self.processor = AutoProcessor.from_pretrained(qwen_id, trust_remote_code=True)
             self.model = Qwen3VLForConditionalGeneration.from_pretrained(
                 qwen_id, 
-                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+                dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
                 device_map="cuda" if self.device == "cuda" else "cpu",
                 trust_remote_code=True
             )
@@ -212,8 +212,11 @@ class OCRPipelineRunner:
             scene_texts = []
             
             for ocr_data in data["all"]:
-                ot = ocr_data.get("overlay_text", "").strip()
-                st = ocr_data.get("scene_text", "").strip()
+                ot_raw = ocr_data.get("overlay_text", "")
+                st_raw = ocr_data.get("scene_text", "")
+                
+                ot = " | ".join([str(x) for x in ot_raw]) if isinstance(ot_raw, list) else str(ot_raw).strip()
+                st = " | ".join([str(x) for x in st_raw]) if isinstance(st_raw, list) else str(st_raw).strip()
                 if ot and ot not in overlay_texts:
                     overlay_texts.append(ot)
                 if st and st not in scene_texts:
