@@ -72,7 +72,7 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-torch = { registry = "https://pypi.org/simple" }
-torchaudio = { registry = "https://pypi.org/simple" }
-torchvision = { registry = "https://pypi.org/simple" }
+torch = { index = "pypi" }
+torchaudio = { index = "pypi" }
+torchvision = { index = "pypi" }
 
