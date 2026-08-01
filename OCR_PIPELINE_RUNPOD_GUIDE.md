@@ -4,13 +4,13 @@
 
 ---
 
-## 📌 1. TỔNG QUAN KIẾN TRÚC PIPELINE VÀ JUSTIFICATION (TẠI SAO DÙNG QWEN2-VL?)
+## 📌 1. TỔNG QUAN KIẾN TRÚC PIPELINE VÀ JUSTIFICATION (TẠI SAO DÙNG QWEN3-VL?)
 
-### 💡 Justification: Tại sao thay thế PaddleOCR bằng Qwen2-VL?
-Theo các nghiên cứu mới nhất về **Video Document Understanding** (như top đầu benchmark trên [DocVQA](https://www.docvqa.org/) và [OCRBench](https://github.com/Yuliang-Liu/MultimodalOCR)), các mô hình VLM như **Qwen2-VL / Qwen2.5-VL** đã vượt qua các pipeline OCR truyền thống nhờ khả năng **đọc hiểu ngữ cảnh (Semantic Comprehension)**. Hơn nữa, tập dữ liệu của AI Challenge chứa lượng lớn **Video Thời sự (HTV9) với chữ chạy (News ticker) và bảng hiệu tiếng Việt phức tạp**. Qwen2-VL là mô hình SOTA hỗ trợ Zero-shot tiếng Việt vượt trội so với PaddleOCR (vốn hay bị lỗi dấu ở phông chữ khó):
-1. **Semantic Grouping (Gom nhóm ngữ nghĩa):** PaddleOCR trả về một "rổ chữ" lộn xộn (bag-of-words). Qwen2-VL có khả năng phân biệt đâu là dòng tiêu đề thời sự, đâu là chữ ngẫu nhiên trên áo nhân vật.
+### 💡 Justification: Tại sao thay thế PaddleOCR bằng Qwen3-VL?
+Theo các nghiên cứu mới nhất về **Video Document Understanding** (như top đầu benchmark trên [DocVQA](https://www.docvqa.org/) và [OCRBench](https://github.com/Yuliang-Liu/MultimodalOCR)), các mô hình VLM như **Qwen3-VL** đã vượt qua các pipeline OCR truyền thống nhờ khả năng **đọc hiểu ngữ cảnh (Semantic Comprehension)**. Hơn nữa, tập dữ liệu của AI Challenge chứa lượng lớn **Video Thời sự (HTV9) với chữ chạy (News ticker) và bảng hiệu tiếng Việt phức tạp**. Qwen3-VL là mô hình SOTA hỗ trợ Zero-shot tiếng Việt vượt trội so với PaddleOCR (vốn hay bị lỗi dấu ở phông chữ khó):
+1. **Semantic Grouping (Gom nhóm ngữ nghĩa):** PaddleOCR trả về một "rổ chữ" lộn xộn (bag-of-words). Qwen3-VL có khả năng phân biệt đâu là dòng tiêu đề thời sự, đâu là chữ ngẫu nhiên trên áo nhân vật.
 2. **End-to-End Pipeline:** Loại bỏ hoàn toàn sự phức tạp của ByteTrack (Tracking) và Layout Classifier. VLM xử lý trực tiếp từ ảnh sang JSON có cấu trúc.
-3. **Khắc phục điểm yếu (Hallucinations):** Quá trình phân tích log cho thấy Qwen2-VL thường bị "ảo giác" lặp từ (VD: lặp lại mốc thời gian `06:31:37` hàng chục lần). Để đưa pipeline này vào thi đấu thực tế, kiến trúc bên dưới đã được **cải tiến đặc biệt** bằng kỹ thuật *Spatial UI Masking* và *Structured Prompting*.
+3. **Khắc phục điểm yếu (Hallucinations):** Quá trình phân tích log cho thấy Qwen3-VL thường bị "ảo giác" lặp từ (VD: lặp lại mốc thời gian `06:31:37` hàng chục lần). Để đưa pipeline này vào thi đấu thực tế, kiến trúc bên dưới đã được **cải tiến đặc biệt** bằng kỹ thuật *Spatial UI Masking* và *Structured Prompting*.
 
 ### 🏗️ Kiến trúc Pipeline Cải tiến (3-Stage Architecture)
 
@@ -23,7 +23,7 @@ Theo các nghiên cứu mới nhất về **Video Document Understanding** (như
        │
        ▼
 [STAGE 2: VLM Structured Prompting & VQA]
-       └── Sử dụng `Qwen2-VL-2B-Instruct` đọc hiểu văn bản và ép xuất JSON theo format.
+       └── Sử dụng `Qwen3-VL-7B-Instruct` đọc hiểu văn bản và ép xuất JSON theo format.
        │
        ▼
 [STAGE 3: DB Export & Indexing (Two-Tier Schema)]
@@ -42,7 +42,7 @@ Việc vận hành một VLM khổng lồ trên lượng dữ liệu video đa d
 - **Lý do & Dẫn chứng:** Theo báo cáo nghiên cứu SOTA của [Qwen-VL (arXiv:2308.12966)](https://arxiv.org/abs/2308.12966) và [Video-LLaVA (arXiv:2311.10122)](https://arxiv.org/abs/2311.10122), chiến lược lấy mẫu thưa (Sparse Sampling) giải quyết bài toán cốt lõi của VLM: Chi phí tính toán cực cao (có thể tốn 300ms/frame). Việc chỉ lấy 2-3 frames cân bằng hoàn hảo giữa tốc độ và độ bao phủ thông tin. Ngược lại, nếu chỉ dựa vào 1 frame ngẫu nhiên từ BTC, hệ thống vô cùng dễ trúng vào flash-frame (cảnh chớp sáng) hoặc frame mờ, dẫn đến việc VLM từ chối phục vụ (báo lỗi *"Sorry, I can't assist"*). Ngoài ra, nhiều frame giúp tóm gọn được chữ cuộn (scrolling ticker) từ đầu đến cuối shot.
 
 ### STAGE 2: VLM Structured Prompting & VQA
-- **Cách hoạt động:** Ta trực tiếp đưa ảnh gốc vào `Qwen2-VL-2B-Instruct` mà không dùng kỹ thuật vẽ box đen (UI Masking) cứng nhắc, vốn dễ làm mất chữ quan trọng khi chạy trên các video Vlog/Phim không có logo đài.
+- **Cách hoạt động:** Ta trực tiếp đưa ảnh gốc vào `Qwen3-VL-7B-Instruct` mà không dùng kỹ thuật vẽ box đen (UI Masking) cứng nhắc, vốn dễ làm mất chữ quan trọng khi chạy trên các video Vlog/Phim không có logo đài.
 - **Giải quyết Ảo giác (Hallucination):** Dùng kỹ thuật **Zero-shot Prompt Engineering** ép khuôn JSON đầu ra: *"Hãy phân loại chữ thành 'overlay_text' và 'scene_text'. ĐẶC BIỆT PHỚT LỜ các logo nhỏ, đồng hồ, và mốc thời gian. Chỉ trả về JSON."*
 - **Lý do & Dẫn chứng (Tối ưu Truy vấn KIS):** Việc yêu cầu VLM phân loại rõ `'overlay_text'` (chữ đồ họa chèn thêm) và `'scene_text'` (chữ tự nhiên trong cảnh) là vũ khí cực mạnh cho AI Challenge. Ví dụ, nếu đề thi KIS yêu cầu *"Tìm bảng hiệu tiệm bánh mì"*, Elasticsearch của bạn có thể tăng trọng số (boost weight) cho trường `'scene_text'` và phớt lờ các tin thời sự chạy bên dưới (`'overlay_text'`). Hơn nữa, ép định dạng JSON triệt tiêu hoàn toàn rác hội thoại của AI (như *"Theo hình ảnh..."*), giữ Database luôn sạch sẽ.
 
@@ -56,7 +56,7 @@ Việc vận hành một VLM khổng lồ trên lượng dữ liệu video đa d
 
 ## 📋 3. INPUT / OUTPUT CONTRACT & PROMPT ENGINEERING
 
-### Kỹ thuật Structured Prompting cho Qwen2-VL
+### Kỹ thuật Structured Prompting cho Qwen3-VL
 Để tránh VLM mô tả miên man, Prompt phải được thiết kế để ép ra JSON:
 > *"Hãy trích xuất tất cả văn bản tiếng Việt xuất hiện trong bức ảnh này. Phân loại chúng thành hai nhóm: 'overlay_text' (chữ được chèn lên video như tiêu đề, tin chạy) và 'scene_text' (chữ tự nhiên trong cảnh như biển hiệu, áo). Bỏ qua các logo nhỏ. Chỉ trả về JSON format: {"overlay_text": "...", "scene_text": "..."}. Không giải thích."*
 
@@ -133,7 +133,7 @@ uv pip install transformers>=4.45.0 qwen-vl-utils tensorflow==2.15.0 opencv-pyth
 # 1. (Tùy chọn) Chạy trích xuất Shot Boundaries tự động bằng TransNetV2
 uv run python extract/workers/transnet.py --video ./data/raw/L21_V019.mp4 --output ./data/extracted/keyframes
 
-# 2. Chạy Pipeline OCR bằng Qwen2-VL
+# 2. Chạy Pipeline OCR bằng Qwen3-VL
 uv run python pipelines/run_ocr_pipeline.py \
     --video-dir ./data/extracted \
     --output-dir ./data/processed/ocr \
@@ -147,7 +147,7 @@ uv run python pipelines/run_ocr_pipeline.py \
 
 Để chứng minh VLM hiệu quả hơn OCR truyền thống trong cuộc thi này, thực hiện A/B Testing:
 
-| Tiêu chí thi đấu AI Challenge | Kịch bản A (PaddleOCR Cũ) | Kịch bản B (Qwen2-VL Cải tiến) |
+| Tiêu chí thi đấu AI Challenge | Kịch bản A (PaddleOCR Cũ) | Kịch bản B (Qwen3-VL Cải tiến) |
 | :--- | :--- | :--- |
 | **Lọc nhiễu Timestamp (Tăng Precision)** | Vẫn bị đọc (VD: `06:31:37`) | 🟢 Đã bị lọc nhờ Zero-shot Prompting |
 | **Truy vấn AVS (Gom nhóm ngữ nghĩa)** | Rời rạc từng Box, dễ đứt đoạn | 🟢 VLM tự động gom thành câu hoàn chỉnh |
