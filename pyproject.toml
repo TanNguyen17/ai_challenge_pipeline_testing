@@ -53,7 +53,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "supervision>=0.19.0",
     "ram @ git+https://github.com/xinyu1205/recognize-anything.git",
-    "whisperx @ git+https://github.com/m-bain/whisperx.git",
+    "whisperx",
     "transnetv2-pytorch>=1.0.0",
     "qwen-asr",
     "numba>=0.59.0",
