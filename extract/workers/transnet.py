@@ -73,7 +73,7 @@ class TransNetV2Detector:
         with torch.no_grad():
             if self.model is not None:
                 single_frame_pred, all_frames_pred = self.model(input_tensor)
-                predictions = single_frame_pred[0].cpu().numpy() # [T]
+                predictions = single_frame_pred[0].cpu().numpy().flatten() # [T]
             else:
                 predictions = np.zeros(len(frames))
 
@@ -91,7 +91,7 @@ class TransNetV2Detector:
                     "start_sec": round(start_frame / fps, 2),
                     "end_sec": round(actual_frame_idx / fps, 2),
                     "keyframe_id": mid_frame,
-                    "transition_probability": round(float(prob), 3)
+                    "transition_probability": round(float(np.squeeze(prob)), 3)
                 })
                 shot_id += 1
                 start_frame = actual_frame_idx
