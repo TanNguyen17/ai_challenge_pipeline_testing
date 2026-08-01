@@ -56,7 +56,8 @@ dependencies = [
     "whisperx @ git+https://github.com/m-bain/whisperx.git",
     "transnetv2-pytorch>=1.0.0",
     "qwen-asr",
-    "numba>=0.59.0"
+    "numba>=0.59.0",
+    "fairscale"
 ]
 
 [build-system]
