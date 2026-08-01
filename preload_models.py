@@ -124,7 +124,7 @@ def preload_all_models():
         tn2_weight_path = "./data/models/transnetv2_weights.pth"
         if not os.path.exists(tn2_weight_path):
             print("Downloading TransNetV2 real weights...")
-            url = "https://github.com/soCzech/TransNetV2/raw/master/inference/pytorch/transnetv2-pytorch-weights.pth"
+            url = "https://huggingface.co/MiaoshouAI/transnetv2-pytorch-weights/resolve/main/transnetv2-pytorch-weights.pth"
             try:
                 urllib.request.urlretrieve(url, tn2_weight_path)
                 print("✅ Downloaded TransNetV2 weights.")
