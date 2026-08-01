@@ -63,3 +63,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app", "pipelines", "eval"]
+
+[tool.uv]
+override-dependencies = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
+[tool.uv.sources]
+torch = { registry = "https://pypi.org/simple" }
+torchaudio = { registry = "https://pypi.org/simple" }
+torchvision = { registry = "https://pypi.org/simple" }
+
