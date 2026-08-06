@@ -29,8 +29,11 @@ import torchvision.transforms as transforms
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
         pass
+
+# Ensure correct Python path so it can find the 'extract' module
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from typing import List, Dict, Any
 from extract.workers.keyframe_loader import KeyframeLoader
 
