@@ -42,6 +42,7 @@ import ram.models.bert
 ram.models.bert.BertPreTrainedModel.tie_weights = lambda *args, **kwargs: None
 if hasattr(ram.models.bert, 'BertModel'):
     ram.models.bert.BertModel.tie_weights = lambda *args, **kwargs: None
+    ram.models.bert.BertModel.get_head_mask = lambda self, head_mask, num_hidden_layers, is_attention_chunked=False: [None] * num_hidden_layers
 
 from ram.models import ram_plus
 from ram import inference_ram as inference_ram_plus
@@ -274,10 +275,10 @@ class ObjectDetectionPipelineRunner:
         shot_documents = []
         from collections import defaultdict
         
-        # Group frames by shot ID (keyframe_n)
+        # Group frames by shot ID
         shot_groups = defaultdict(list)
         for doc in per_frame_documents:
-            shot_groups[doc["keyframe_n"]].append(doc)
+            shot_groups[doc["shot_id"]].append(doc)
             
         for shot_id, frames in shot_groups.items():
             shot_time_range = {
