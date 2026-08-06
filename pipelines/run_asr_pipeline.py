@@ -12,6 +12,7 @@ import whisperx.vad
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
         pass
 
 # Ensure correct Python path so it can find the 'extract' module
@@ -23,8 +24,8 @@ from extract.workers.keyframe_loader import KeyframeLoader
 class ASRPipelineRunner:
     """
     SOTA 4-Stage Vietnamese Video ASR Pipeline:
-    Stage 1: WhisperX VAD (Voice Activity Detection Chunking)
-    Stage 2: Qwen3-ASR-1.7B (High-throughput Specialized ASR)
+    Stage 1: Silero VAD (Voice Activity Detection Chunking)
+    Stage 2: Qwen3-ASR-1.7B via transformers (High-throughput Specialized ASR)
     Stage 3: WhisperX Phoneme/Word-level Timestamp Alignment
     Stage 4: Two-Tier DB Schema Export (asr_span / shot)
     """
@@ -40,24 +41,25 @@ class ASRPipelineRunner:
         self._init_whisperx()
 
     def _init_asr_model(self):
-        """Initializes Qwen3-ASR-1.7B ASR model engine."""
+        """Initializes Qwen3-ASR-1.7B natively via transformers."""
         self.asr_model = None
+        self.asr_processor = None
         self.vad_model = None
         try:
-            print("Loading Qwen3-ASR-1.7B via qwen_asr...")
-            try:
-                from qwen_asr import Qwen3ASRModel
-            except ImportError:
-                raise RuntimeError("qwen-asr package is not installed. Please install it.")
-                
+            print("Loading Qwen/Qwen3-ASR-1.7B via transformers...")
+            from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+            
             model_id = "Qwen/Qwen3-ASR-1.7B"
             use_gpu = self.device == "cuda"
             
-            self.asr_model = Qwen3ASRModel.from_pretrained(
+            self.asr_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+            self.asr_model = AutoModelForSpeechSeq2Seq.from_pretrained(
                 model_id, 
                 dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
                 device_map="cuda" if use_gpu else "cpu",
+                trust_remote_code=True
             )
+            self.asr_model.eval()
             print(f"✅ ASR Model '{model_id}' loaded successfully.")
             
             # Load VAD model via Silero-VAD directly
@@ -143,7 +145,7 @@ class ASRPipelineRunner:
                 vad_segment_count = len(vad_segments)
                 wx_segments = []
                 
-                # 2. Qwen3-ASR Transcription
+                # 2. Qwen3-ASR Transcription via transformers
                 for seg in vad_segments:
                     start_sec = seg["start"]
                     end_sec = seg["end"]
@@ -156,12 +158,15 @@ class ASRPipelineRunner:
                     if len(chunk_audio) < 1600: # Skip very short noise (<0.1s)
                         continue
                         
-                    # Use official qwen_asr wrapper which handles the thinker->model mapping
-                    res = self.asr_model.transcribe(
-                        audio=(chunk_audio, 16000),
-                        language="Vietnamese"
-                    )
-                    transcription = res[0].text
+                    # Hugging Face inference
+                    inputs = self.asr_processor(chunk_audio, sampling_rate=16000, return_tensors="pt").to(self.device)
+                    # Convert inputs to expected dtype if necessary (e.g., bfloat16)
+                    if hasattr(inputs, "input_features"):
+                        inputs["input_features"] = inputs["input_features"].to(self.asr_model.dtype)
+                        
+                    with torch.no_grad():
+                        generated_ids = self.asr_model.generate(**inputs, max_new_tokens=256)
+                    transcription = self.asr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
                     
                     raw_text = transcription.strip()
                     if not raw_text: continue
@@ -190,7 +195,6 @@ class ASRPipelineRunner:
                 # 3. WhisperX Alignment (Real SOTA Phoneme alignment)
                 if hasattr(self, 'align_model') and self.align_model is not None and wx_segments:
                     try:
-                        audio_np = whisperx.load_audio(temp_wav_path)
                         result = whisperx.align(wx_segments, self.align_model, self.align_metadata, audio_np, self.device, return_char_alignments=False)
                         for seg in result["segments"]:
                             for w in seg.get("words", []):
@@ -204,7 +208,7 @@ class ASRPipelineRunner:
                     except Exception as e:
                         print(f"WhisperX alignment error for {video_id}: {e}")
                 
-                # Fallback to chunk timestamps if WhisperX fails
+                # Fallback to chunk timestamps if WhisperX alignment fails
                 if not word_level_data:
                     for seg in wx_segments:
                         # Since we don't have exact word timestamps from Qwen3-ASR, distribute time evenly
@@ -362,7 +366,7 @@ class ASRPipelineRunner:
                 total_docs += res.get("num_documents", 0)
 
         benchmark_report = {
-            "pipeline": "SOTA 4-Stage Vietnamese ASR (Qwen3-ASR)",
+            "pipeline": "SOTA 4-Stage Vietnamese ASR (Qwen3-ASR via Transformers)",
             "videos_processed": len(video_files),
             "total_elapsed_sec": round(total_time, 2),
             "avg_time_per_video_sec": round(total_time / len(video_files), 3) if video_files else 0,

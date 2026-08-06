@@ -22,6 +22,11 @@ if not hasattr(transformers.modeling_utils, 'find_pruneable_heads_and_indices'):
         transformers.modeling_utils.find_pruneable_heads_and_indices = lambda *args, **kwargs: (set(), [])
         transformers.modeling_utils.prune_linear_layer = lambda *args, **kwargs: None
 
+# Patch for RAM++ compatibility with newer transformers (fixes AttributeError: additional_special_tokens_ids)
+import transformers
+if not hasattr(transformers.BertTokenizer, 'additional_special_tokens_ids'):
+    transformers.BertTokenizer.additional_special_tokens_ids = property(lambda self: [self.convert_tokens_to_ids(t) for t in self.additional_special_tokens])
+
 from ram.models import ram_plus
 from ram import inference_ram as inference_ram_plus
 import torchvision.transforms as transforms
@@ -82,7 +87,7 @@ class ObjectDetectionPipelineRunner:
                     "television", "laptop", "phone", "camera",
                 ]
                 self.yolo_model.set_classes(self.prompt_classes)
-                print(f"✅ YOLOE loaded and set_classes() with {len(self.prompt_classes)} prompts successfully.")
+                print(f"✅ YOLO-World v2 loaded and set_classes() with {len(self.prompt_classes)} prompts successfully.")
             except Exception as ex:
                 raise RuntimeError(f"❌ FATAL: Could not load YOLOE {model_weights} or set_classes: {ex}")
         except Exception as e:
