@@ -37,6 +37,12 @@ import ram.models.utils
 sys.modules['ram.models.ram_plus'].init_tokenizer = patched_init_tokenizer
 sys.modules['ram.models.utils'].init_tokenizer = patched_init_tokenizer
 
+# Patch for RAM++ tie_weights crash in newer transformers
+import ram.models.bert
+ram.models.bert.BertPreTrainedModel.tie_weights = lambda *args, **kwargs: None
+if hasattr(ram.models.bert, 'BertModel'):
+    ram.models.bert.BertModel.tie_weights = lambda *args, **kwargs: None
+
 from ram.models import ram_plus
 from ram import inference_ram as inference_ram_plus
 import torchvision.transforms as transforms
