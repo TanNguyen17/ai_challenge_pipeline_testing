@@ -45,11 +45,12 @@ class ObjectDetectionPipelineRunner:
     Stage 3: Shot-Level Summarization (Two-Tier Schema: od_span / shot)
     Stage 4: Microsoft Florence-2 Reranking (Online - executed in Search API)
     """
-    def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, device: str = "cuda"):
+    def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, device: str = "cuda", batch_size: int = 16):
         self.video_dir = video_dir
         self.output_dir = output_dir
         self.keyframes_dir = keyframes_dir
         self.device = device
+        self.batch_size = batch_size
         os.makedirs(output_dir, exist_ok=True)
         self.keyframe_loader = KeyframeLoader(keyframes_dir)
         self._init_yolo_model()
@@ -221,7 +222,7 @@ class ObjectDetectionPipelineRunner:
 
         per_frame_documents = []
         
-        BATCH_SIZE = 16
+        BATCH_SIZE = self.batch_size
         frame_batch = []
         shot_batch = []
 
@@ -380,9 +381,10 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./data/processed/objects", help="Output directory for Object records")
     parser.add_argument("--keyframes-dir", type=str, default="./data/extracted/video batch 1/map-keyframes-aic25-b1/map-keyframes", help="Directory containing BTC keyframe CSVs")
     parser.add_argument("--limit", type=int, default=50, help="Maximum number of videos to process in benchmark")
+    parser.add_argument("--batch-size", type=int, default=16, help="Force a specific batch size (e.g., 32 or 64 for A100)")
     args = parser.parse_args()
 
-    runner = ObjectDetectionPipelineRunner(args.video_dir, args.output_dir, args.keyframes_dir)
+    runner = ObjectDetectionPipelineRunner(args.video_dir, args.output_dir, args.keyframes_dir, batch_size=args.batch_size)
     runner.run_benchmark(args.limit)
 
 if __name__ == "__main__":
