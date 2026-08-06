@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 import transformers.modeling_utils
 if not hasattr(transformers.modeling_utils, 'apply_chunking_to_forward'):
-    transformers.modeling_utils.apply_chunking_to_forward = lambda *args, **kwargs: None
+    transformers.modeling_utils.apply_chunking_to_forward = lambda forward_fn, chunk_size, chunk_dim, *input_tensors: forward_fn(*input_tensors)
 if not hasattr(transformers.modeling_utils, 'find_pruneable_heads_and_indices'):
     try:
         from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer
