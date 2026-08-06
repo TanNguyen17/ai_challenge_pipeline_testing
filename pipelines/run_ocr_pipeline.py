@@ -73,7 +73,7 @@ class OCRPipelineRunner:
                 dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
                 device_map="auto",
                 trust_remote_code=True,
-                attn_implementation="flash_attention_2"
+                attn_implementation="sdpa"
             )
             self.model.eval()
             print("✅ Transformers Engine loaded successfully.")
