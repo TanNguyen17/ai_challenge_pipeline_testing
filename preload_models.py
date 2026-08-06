@@ -151,11 +151,10 @@ def preload_all_models():
     # 7. Preload WhisperX VAD & Alignment Models
     print("\n--- 7/7 Pre-downloading WhisperX VAD & Alignment Models ---")
     try:
-        import whisperx
-        import whisperx.vad
         import torch
-        print("Preloading WhisperX VAD Model...")
-        vad_model = whisperx.vad.load_vad_model(torch.device("cpu"))
+        import whisperx
+        print("Preloading WhisperX VAD Model natively via Silero...")
+        vad_model, _ = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False)
         del vad_model
         clear_memory()
         

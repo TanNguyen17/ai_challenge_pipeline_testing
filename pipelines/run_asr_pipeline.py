@@ -57,9 +57,11 @@ class ASRPipelineRunner:
             )
             print(f"✅ ASR Model '{model_id}' loaded successfully.")
             
-            # Load VAD model from WhisperX for robust chunking
-            print("Loading WhisperX VAD model...")
-            self.vad_model = whisperx.vad.load_vad_model(torch.device(self.device))
+            # Load VAD model via Silero-VAD directly
+            print("Loading Silero VAD model natively...")
+            self.vad_model, self.vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False)
+            self.vad_model = self.vad_model.to(torch.device(self.device))
+            self.get_speech_timestamps = self.vad_utils[0]
             print("✅ VAD Model loaded.")
                 
         except Exception as e:
@@ -106,11 +108,34 @@ class ASRPipelineRunner:
 
         if audio_extracted and self.asr_model is not None:
             try:
-                # 1. VAD Chunking
+                # 1. VAD Chunking using native Silero
+                import torchaudio
+                wav, sr = torchaudio.load(temp_wav_path)
+                wav = wav.squeeze(0).to(torch.device(self.device))
+                speech_timestamps = self.get_speech_timestamps(wav, self.vad_model, sampling_rate=16000)
+                
+                vad_segments = []
+                current_start = None
+                current_end = None
+                
+                for stamp in speech_timestamps:
+                    s_sec = stamp['start'] / 16000.0
+                    e_sec = stamp['end'] / 16000.0
+                    
+                    if current_start is None:
+                        current_start = s_sec
+                        current_end = e_sec
+                    elif (e_sec - current_start) <= 30.0:
+                        current_end = e_sec
+                    else:
+                        vad_segments.append({"start": current_start, "end": current_end})
+                        current_start = s_sec
+                        current_end = e_sec
+                
+                if current_start is not None:
+                    vad_segments.append({"start": current_start, "end": current_end})
+                    
                 audio_np = whisperx.load_audio(temp_wav_path)
-                vad_segments = whisperx.vad.find_vad(audio_np, self.vad_model)
-                # Ensure segments are manageable (e.g. max 30 seconds)
-                vad_segments = whisperx.vad.merge_chunks(vad_segments, chunk_size=30)
                 
                 vad_segment_count = len(vad_segments)
                 wx_segments = []
