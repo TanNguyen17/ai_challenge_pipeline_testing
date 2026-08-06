@@ -221,6 +221,8 @@ class ObjectDetectionPipelineRunner:
                     "shot_id": shot.get("keyframe_n", 0),
                     "frame_idx": f_idx,
                     "time_sec": round(time_sec, 2),
+                    "start_sec": shot.get("start_sec", 0.0),
+                    "end_sec": shot.get("end_sec", 0.0),
                     "objects": frame_detections,
                     "scene_tags": scene_tags
                 }
@@ -282,8 +284,8 @@ class ObjectDetectionPipelineRunner:
             
         for shot_id, frames in shot_groups.items():
             shot_time_range = {
-                "start_sec": min(f["time_range"]["start_sec"] for f in frames),
-                "end_sec": max(f["time_range"]["end_sec"] for f in frames)
+                "start_sec": min(f["start_sec"] for f in frames),
+                "end_sec": max(f["end_sec"] for f in frames)
             }
             
             max_counts = defaultdict(int)
