@@ -32,11 +32,12 @@ class OCRPipelineRunner:
     - Uses Frame Deduplication (SSIM) to skip visually identical frames.
     - Runs 2 frames per shot for maximum coverage without performance loss (thanks to deduplication).
     """
-    def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, backend: str = "vllm"):
+    def __init__(self, video_dir: str, output_dir: str, keyframes_dir: str, backend: str = "vllm", batch_size: int = None):
         self.video_dir = video_dir
         self.output_dir = output_dir
         self.keyframes_dir = keyframes_dir
         self.backend = backend
+        self.batch_size = batch_size if batch_size else (16 if backend == "vllm" else 8)
         os.makedirs(output_dir, exist_ok=True)
         self.keyframe_loader = KeyframeLoader(keyframes_dir)
         self._init_model()
@@ -225,7 +226,7 @@ class OCRPipelineRunner:
         # STAGE 2: BATCH PROCESS UNIQUE FRAMES
         # ==========================================
         unique_ocr_results = {}
-        batch_size = 16 if self.backend == "vllm" else 8
+        batch_size = self.batch_size
         
         print(f"[{video_id}] VLM Processing {len(unique_frames)} unique frames (Filtered from {len(shot_frame_mapping)} total)...")
         
@@ -409,9 +410,10 @@ def main():
     parser.add_argument("--keyframes-dir", type=str, default="./data/extracted/video batch 1/map-keyframes-aic25-b1/map-keyframes", help="Directory containing BTC keyframe CSVs")
     parser.add_argument("--limit", type=int, default=50, help="Maximum number of videos to process")
     parser.add_argument("--backend", type=str, choices=["vllm", "transformers"], default="vllm", help="Inference backend engine (vLLM is ~3x faster)")
+    parser.add_argument("--batch-size", type=int, default=None, help="Force a specific batch size (e.g., 32 or 64 for A100)")
     args = parser.parse_args()
 
-    runner = OCRPipelineRunner(args.video_dir, args.output_dir, args.keyframes_dir, backend=args.backend)
+    runner = OCRPipelineRunner(args.video_dir, args.output_dir, args.keyframes_dir, backend=args.backend, batch_size=args.batch_size)
     runner.run_benchmark(args.limit)
 
 if __name__ == "__main__":
