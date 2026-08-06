@@ -61,8 +61,8 @@ class OCRPipelineRunner:
                 self.sampling_params = SamplingParams(max_tokens=256, temperature=0.0)
                 self.processor = AutoProcessor.from_pretrained(self.qwen_id, trust_remote_code=True)
                 print("✅ vLLM Engine loaded successfully.")
-            except ImportError:
-                print("❌ vLLM not installed. Please install it or use '--backend transformers'")
+            except Exception as e:
+                print(f"❌ vLLM failed to load. The exact error is:\n{e}\n\nPlease use '--backend transformers' instead.")
                 sys.exit(1)
         else:
             # Fallback to standard transformers
