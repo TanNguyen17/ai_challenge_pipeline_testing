@@ -23,9 +23,17 @@ if not hasattr(transformers.modeling_utils, 'find_pruneable_heads_and_indices'):
         transformers.modeling_utils.prune_linear_layer = lambda *args, **kwargs: None
 
 # Patch for RAM++ compatibility with newer transformers (fixes AttributeError: additional_special_tokens_ids)
-import transformers
-if not hasattr(transformers.BertTokenizer, 'additional_special_tokens_ids'):
-    transformers.BertTokenizer.additional_special_tokens_ids = property(lambda self: [self.convert_tokens_to_ids(t) for t in self.additional_special_tokens])
+def patched_init_tokenizer(text_encoder_type):
+    from transformers import BertTokenizer
+    tokenizer = BertTokenizer.from_pretrained(text_encoder_type)
+    tokenizer.add_special_tokens({'additional_special_tokens': ['[DEC]','[ENC]']})
+    tokenizer.enc_token_id = tokenizer.convert_tokens_to_ids('[ENC]')
+    return tokenizer
+
+import ram.models.ram_plus
+import ram.models.utils
+ram.models.ram_plus.init_tokenizer = patched_init_tokenizer
+ram.models.utils.init_tokenizer = patched_init_tokenizer
 
 from ram.models import ram_plus
 from ram import inference_ram as inference_ram_plus
