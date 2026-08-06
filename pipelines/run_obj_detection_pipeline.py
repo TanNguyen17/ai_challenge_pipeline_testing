@@ -30,10 +30,12 @@ def patched_init_tokenizer(text_encoder_type):
     tokenizer.enc_token_id = tokenizer.convert_tokens_to_ids('[ENC]')
     return tokenizer
 
+import sys
 import ram.models.ram_plus
 import ram.models.utils
-ram.models.ram_plus.init_tokenizer = patched_init_tokenizer
-ram.models.utils.init_tokenizer = patched_init_tokenizer
+
+sys.modules['ram.models.ram_plus'].init_tokenizer = patched_init_tokenizer
+sys.modules['ram.models.utils'].init_tokenizer = patched_init_tokenizer
 
 from ram.models import ram_plus
 from ram import inference_ram as inference_ram_plus
