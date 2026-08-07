@@ -6,29 +6,29 @@ REPO_ID = "htkien95/DATA-AIC-2025"
 DEFAULT_LOCAL_DIR = "./data/raw"
 
 # Phase 0 files: Queries and metadata (~5 MB)
-PHASE0_FILES = [
-    "query/DanhSachTruyVanAIC_Chungket.xlsx",
-    "query/query-p1-groupA.zip",
-    "query/query-p2-groupA.zip",
-    "query/query-p3-groupA.zip",
-    "video batch 1/map-keyframes-aic25-b1.zip",
-    "video batch 1/media-info-aic25-b1.zip",
-    "video batch 2/map-keyframes-b2.zip",
-    "video batch 2/media-info-aic25-b2.zip"
-]
+# PHASE0_FILES = [
+#     "query/DanhSachTruyVanAIC_Chungket.xlsx",
+#     "query/query-p1-groupA.zip",
+#     "query/query-p2-groupA.zip",
+#     "query/query-p3-groupA.zip",
+#     "video batch 1/map-keyframes-aic25-b1.zip",
+#     "video batch 1/media-info-aic25-b1.zip",
+#     "video batch 2/map-keyframes-b2.zip",
+#     "video batch 2/media-info-aic25-b2.zip"
+# ]
 
 # Phase 1 files: Pre-computed CLIP features and BTC Object Detections (~1.6 GB)
-PHASE1_FILES = [
-    "video batch 1/clip-features-32-aic25-b1.zip",
-    "video batch 1/objects-aic25-b1.zip",
-    "video batch 2/clip-features-32-aic25-b2.zip",
-    "video batch 2/objects-aic25-b2.zip"
-]
+# PHASE1_FILES = [
+#     "video batch 1/clip-features-32-aic25-b1.zip",
+#     "video batch 1/objects-aic25-b1.zip",
+#     "video batch 2/clip-features-32-aic25-b2.zip",
+#     "video batch 2/objects-aic25-b2.zip"
+# ]
 
 # Benchmark subset files: Videos L21_a and L22_a (~650 videos, ~7.4 GB)
 BENCHMARK_VIDEO_FILES = [
-    "video batch 1/Videos_L21_a.zip",
-    "video batch 1/Videos_L22_a.zip"
+    "DATA AIC 2026/video batch 1/Videos_L21_a.zip",
+    "DATA AIC 2026/video batch 1/Videos_L22_a.zip"
 ]
 
 def download_file_list(files, phase_name, local_dir):
@@ -55,12 +55,12 @@ def main():
                         help="Which data phase to download: phase0 (Queries/Meta), phase1 (CLIP/Objects), benchmark (650 videos), all")
     args = parser.parse_args()
 
-    if args.phase in ["phase0", "all"]:
-        download_file_list(PHASE0_FILES, "Phase 0 (Queries & Metadata)", args.output_dir)
-    if args.phase in ["phase1", "all"]:
-        download_file_list(PHASE1_FILES, "Phase 1 (CLIP Features & Object Detections)", args.output_dir)
+    # if args.phase in ["phase0", "all"]:
+    #     download_file_list(PHASE0_FILES, "Phase 0 (Queries & Metadata)", args.output_dir)
+    # if args.phase in ["phase1", "all"]:
+    #     download_file_list(PHASE1_FILES, "Phase 1 (CLIP Features & Object Detections)", args.output_dir)
     if args.phase in ["benchmark", "all"]:
-        download_file_list(PHASE0_FILES, "Phase 0 (Queries & Metadata)", args.output_dir)
+        # download_file_list(PHASE0_FILES, "Phase 0 (Queries & Metadata)", args.output_dir)
         download_file_list(BENCHMARK_VIDEO_FILES, "Benchmark Video Package (~650 Videos)", args.output_dir)
 
     print("\n🎉 Download task completed!")
