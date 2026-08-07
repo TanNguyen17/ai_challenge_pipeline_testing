@@ -17,16 +17,10 @@ PHASE0_FILES = [
 PHASE1_FILES = [f"DATA AIC 2026/clip-features-32/clip-features-32_L{i}.zip" for i in range(21, 31)] \
              + [f"DATA AIC 2026/objects/objects_L{i}.zip" for i in range(21, 31)]
 
-# Benchmark subset files: Videos
+# Benchmark subset files: Videos (Only L21 and L22 as requested)
 BENCHMARK_VIDEO_FILES = [
-    f"DATA AIC 2026/video batch 1/Videos_L{i}_a.zip" for i in range(21, 31) if i not in [25, 26]
-] + [
-    "DATA AIC 2026/video batch 1/Videos_L25_a1.zip",
-    "DATA AIC 2026/video batch 1/Videos_L26_a.zip",
-    "DATA AIC 2026/video batch 1/Videos_L26_b.zip",
-    "DATA AIC 2026/video batch 1/Videos_L26_c.zip",
-    "DATA AIC 2026/video batch 1/Videos_L26_d.zip",
-    "DATA AIC 2026/video batch 1/Videos_L26_e.zip"
+    "DATA AIC 2026/video batch 1/Videos_L21_a.zip",
+    "DATA AIC 2026/video batch 1/Videos_L22_a.zip"
 ]
 
 def download_file_list(files, phase_name, local_dir, token=None):
