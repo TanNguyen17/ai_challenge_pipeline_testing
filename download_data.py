@@ -2,7 +2,7 @@ import os
 import argparse
 from huggingface_hub import hf_hub_download
 
-REPO_ID = "htkien95/DATA-AIC-2025"
+REPO_ID = "htkien95/DATA-AIC"
 DEFAULT_LOCAL_DIR = "./data/raw"
 
 # Phase 0 files: Queries and metadata (~5 MB)

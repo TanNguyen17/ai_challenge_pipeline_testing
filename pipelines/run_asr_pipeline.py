@@ -40,25 +40,22 @@ class ASRPipelineRunner:
         self._init_whisperx()
 
     def _init_asr_model(self):
-        """Initializes Qwen3-ASR-1.7B natively via transformers."""
+        """Initializes Qwen3-ASR-1.7B via qwen-asr."""
         self.asr_model = None
         self.asr_processor = None
         self.vad_model = None
         try:
-            print("Loading Qwen/Qwen3-ASR-1.7B via transformers...")
-            from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+            print("Loading Qwen/Qwen3-ASR-1.7B via qwen-asr...")
+            from qwen_asr import Qwen3ASRModel
             
             model_id = "Qwen/Qwen3-ASR-1.7B"
             use_gpu = self.device == "cuda"
             
-            self.asr_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-            self.asr_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            self.asr_model = Qwen3ASRModel.from_pretrained(
                 model_id, 
                 dtype=torch.bfloat16 if (use_gpu and torch.cuda.is_bf16_supported()) else torch.float16,
                 device_map="cuda" if use_gpu else "cpu",
-                trust_remote_code=True
             )
-            self.asr_model.eval()
             print(f"✅ ASR Model '{model_id}' loaded successfully.")
             
             # Load VAD model via Silero-VAD directly
@@ -157,15 +154,16 @@ class ASRPipelineRunner:
                     if len(chunk_audio) < 1600: # Skip very short noise (<0.1s)
                         continue
                         
-                    # Hugging Face inference
-                    inputs = self.asr_processor(chunk_audio, sampling_rate=16000, return_tensors="pt").to(self.device)
-                    # Convert inputs to expected dtype if necessary (e.g., bfloat16)
-                    if hasattr(inputs, "input_features"):
-                        inputs["input_features"] = inputs["input_features"].to(self.asr_model.dtype)
-                        
-                    with torch.no_grad():
-                        generated_ids = self.asr_model.generate(**inputs, max_new_tokens=256)
-                    transcription = self.asr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                    # Qwen-ASR inference via wrapper
+                    try:
+                        res = self.asr_model.transcribe(
+                            audio=(chunk_audio, 16000),
+                            language="Vietnamese"
+                        )
+                        transcription = res[0].text
+                    except Exception as e:
+                        print(f"Error transcribing segment for {video_id}: {e}")
+                        continue
                     
                     raw_text = transcription.strip()
                     if not raw_text: continue
